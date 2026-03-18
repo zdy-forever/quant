@@ -1,0 +1,24 @@
+regime:
+  symbol_for_regime: "SPY"
+  trend_fast: 20
+  trend_slow: 100
+  trend_threshold: 0.01
+  vol_window: 20
+  vol_threshold: 0.02
+  no_trade_in_range_high_vol: true
+
+position:
+  method: "vol_target"
+  max_positions: 5
+  target_vol_annual: 0.15
+  vol_lookback: 20
+  kelly_fraction: 0.25
+
+risk:
+  max_weight_per_asset: 0.25
+  max_gross_exposure: 1.0
+  max_drawdown: 0.25
+  stop_loss_pct: 0.05
+  take_profit_pct: 0.10
+  slippage_bps: 5.0
+  commission_bps: 0.0
