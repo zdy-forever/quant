@@ -4,6 +4,9 @@
     "breakout_window": 55,
     "volume_window": 20,
     "momentum_window": 60,
+    "trend_filter_window": 100,
+    "volatility_window": 20,
+    "max_daily_volatility": 0.06,
     "min_price": 10.0,
     "min_avg_dollar_volume": 5000000.0,
     "min_volume_ratio": 1.2,
@@ -29,11 +32,11 @@
     "overwrite_frozen": true
   },
   "best_metrics": {
-    "sharpe": 0.09074843443512587,
-    "cagr": 0.0016516081558988205,
-    "max_dd": -0.29469039389949325,
-    "calmar": 0.005604553762470152
+    "sharpe": 0.14832674193897652,
+    "cagr": 0.011035736493313575,
+    "max_dd": -0.27160057951083516,
+    "calmar": 0.04063222734351094
   },
-  "frozen_at_utc": "2026-03-19T10:23:40.295751+00:00",
+  "frozen_at_utc": "2026-03-19T10:30:34.478587+00:00",
   "note": "OOS/test 阶段严禁修改该文件；如策略失效，请整体重做。"
 }

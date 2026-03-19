@@ -2,10 +2,15 @@
   "strategy": "mean_reversion",
   "params": {
     "lookback": 40,
-    "entry_z": 1.5,
+    "entry_z": 2.0,
     "exit_z": 0.0,
     "min_price": 5.0,
-    "top_k": 5
+    "min_avg_dollar_volume": 10000000.0,
+    "trend_window": 150,
+    "require_above_trend_ma": true,
+    "require_positive_trend_return": true,
+    "require_rebound_bar": true,
+    "top_k": 3
   },
   "train_spec": {
     "symbols": [
@@ -27,11 +32,11 @@
     "overwrite_frozen": true
   },
   "best_metrics": {
-    "sharpe": 0.505064939185344,
-    "cagr": 0.08017072781085255,
-    "max_dd": -0.21100943371569203,
-    "calmar": 0.3799390690678423
+    "sharpe": 0.8020385179607864,
+    "cagr": 0.020000356178050627,
+    "max_dd": -0.0194693593314762,
+    "calmar": 1.0000178089025313
   },
-  "frozen_at_utc": "2026-03-19T10:23:46.321288+00:00",
+  "frozen_at_utc": "2026-03-19T10:31:12.697968+00:00",
   "note": "OOS/test 阶段严禁修改该文件；如策略失效，请整体重做。"
 }

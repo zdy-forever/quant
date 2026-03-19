@@ -46,6 +46,9 @@ class TrendBreakoutStrategy(BaseStrategy):
             "breakout_window": 20,
             "volume_window": 20,
             "momentum_window": 20,
+            "trend_filter_window": 100,
+            "volatility_window": 20,
+            "max_daily_volatility": 0.15,
             "min_price": 10.0,
             "min_avg_dollar_volume": 5_000_000.0,
             "min_volume_ratio": 1.5,
@@ -57,6 +60,9 @@ class TrendBreakoutStrategy(BaseStrategy):
             "breakout_window": [20, 55],
             "volume_window": [20],
             "momentum_window": [20, 60],
+            "trend_filter_window": [50, 100],
+            "volatility_window": [20],
+            "max_daily_volatility": [0.04, 0.06, 0.08, 0.12, 0.15],
             "min_volume_ratio": [1.2, 1.5, 2.0],
             "top_k": [3, 5],
         }
@@ -71,6 +77,9 @@ class TrendBreakoutStrategy(BaseStrategy):
         breakout_window = int(params["breakout_window"])
         volume_window = int(params["volume_window"])
         momentum_window = int(params["momentum_window"])
+        trend_filter_window = int(params.get("trend_filter_window", 100))
+        volatility_window = int(params.get("volatility_window", 20))
+        max_daily_volatility = float(params.get("max_daily_volatility", 1.0))
 
         grouped = df.groupby("symbol", group_keys=False)
         df["ret_m"] = grouped["close"].pct_change(momentum_window)
@@ -85,6 +94,10 @@ class TrendBreakoutStrategy(BaseStrategy):
             lambda s: s.rolling(volume_window).mean().shift(1)
         )
         df["volume_ratio"] = df["volume"] / df["avg_volume"]
+        df["trend_ma"] = grouped["close"].transform(lambda s: s.rolling(trend_filter_window).mean())
+        df["daily_volatility"] = grouped["close"].transform(
+            lambda s: s.pct_change().rolling(volatility_window).std(ddof=0)
+        )
 
         min_price = float(params.get("min_price", 0.0))
         min_avg_dollar_volume = float(params.get("min_avg_dollar_volume", 0.0))
@@ -97,11 +110,14 @@ class TrendBreakoutStrategy(BaseStrategy):
             & (df["close"] > df["high_breakout"])
             & (df["volume_ratio"] >= min_volume_ratio)
             & (df["ret_m"] > 0)
+            & ((df["trend_ma"].isna()) | (df["close"] >= df["trend_ma"]))
+            & ((df["daily_volatility"].isna()) | (df["daily_volatility"] <= max_daily_volatility))
         )
 
         score = (
-            0.7 * df["ret_m"].fillna(0.0)
-            + 0.3 * df["volume_ratio"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            0.6 * df["ret_m"].fillna(0.0)
+            + 0.2 * df["volume_ratio"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            + 0.2 * (1.0 - df["daily_volatility"].replace([np.inf, -np.inf], np.nan).fillna(1.0))
         )
 
         idx = pd.MultiIndex.from_frame(

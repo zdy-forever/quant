@@ -38,6 +38,11 @@ class MeanReversionBollingerStrategy(BaseStrategy):
             "entry_z": 2.0,
             "exit_z": 0.5,
             "min_price": 5.0,
+            "min_avg_dollar_volume": 10_000_000.0,
+            "trend_window": 100,
+            "require_above_trend_ma": True,
+            "require_positive_trend_return": True,
+            "require_rebound_bar": True,
             "top_k": 5,
         }
 
@@ -46,6 +51,10 @@ class MeanReversionBollingerStrategy(BaseStrategy):
             "lookback": [10, 20, 40],
             "entry_z": [1.5, 2.0, 2.5],
             "exit_z": [0.0, 0.5, 1.0],
+            "trend_window": [50, 100, 150],
+            "require_above_trend_ma": [True],
+            "require_positive_trend_return": [True],
+            "require_rebound_bar": [True, False],
             "top_k": [3, 5],
         }
 
@@ -59,6 +68,11 @@ class MeanReversionBollingerStrategy(BaseStrategy):
         lookback = int(params["lookback"])
         entry_z = float(params["entry_z"])
         min_price = float(params.get("min_price", 0.0))
+        min_avg_dollar_volume = float(params.get("min_avg_dollar_volume", 0.0))
+        trend_window = int(params.get("trend_window", 100))
+        require_above_trend_ma = bool(params.get("require_above_trend_ma", False))
+        require_positive_trend_return = bool(params.get("require_positive_trend_return", False))
+        require_rebound_bar = bool(params.get("require_rebound_bar", False))
         top_k = int(params.get("top_k", 5))
 
         grouped = df.groupby("symbol", group_keys=False)
@@ -66,10 +80,36 @@ class MeanReversionBollingerStrategy(BaseStrategy):
         std = grouped["close"].transform(
             lambda s: s.rolling(lookback).std(ddof=0).replace(0.0, np.nan)
         )
-        df["z"] = (df["close"] - ma) / std
+        trend_ma = grouped["close"].transform(lambda s: s.rolling(trend_window).mean())
+        trend_ret = grouped["close"].pct_change(trend_window)
+        avg_dollar_volume = (df["close"] * df["volume"])
+        avg_dollar_volume = avg_dollar_volume.groupby(df["symbol"]).transform(
+            lambda s: s.rolling(lookback).mean().shift(1)
+        )
+        rebound_bar = grouped["close"].transform(lambda s: s > s.shift(1))
 
-        entry = (df["z"] < -entry_z) & (df["close"] >= min_price)
-        score = (-df["z"]).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        df["z"] = (df["close"] - ma) / std
+        df["trend_ma"] = trend_ma
+        df["trend_ret"] = trend_ret
+        df["avg_dollar_volume"] = avg_dollar_volume
+        df["rebound_bar"] = rebound_bar
+
+        entry = (
+            (df["z"] < -entry_z)
+            & (df["close"] >= min_price)
+            & (df["avg_dollar_volume"] >= min_avg_dollar_volume)
+        )
+        if require_above_trend_ma:
+            entry &= (df["trend_ma"].isna()) | (df["close"] >= df["trend_ma"])
+        if require_positive_trend_return:
+            entry &= (df["trend_ret"].isna()) | (df["trend_ret"] > 0)
+        if require_rebound_bar:
+            entry &= (df["rebound_bar"].isna()) | (df["rebound_bar"])
+
+        score = (
+            0.6 * (-df["z"]).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            + 0.4 * df["trend_ret"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        )
 
         idx = pd.MultiIndex.from_frame(
             df[["timestamp", "symbol"]],

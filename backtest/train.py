@@ -127,8 +127,26 @@ def _metrics(equity: pd.Series) -> Dict[str, float]:
     cagr = float((equity.iloc[-1] / equity.iloc[0]) ** (1.0 / years) - 1.0)
     peak = equity.cummax()
     max_dd = float((equity / peak - 1.0).min())
-    calmar = float(cagr / (abs(max_dd) + 1e-12))
+    effective_dd = max(abs(max_dd), 0.02)
+    calmar = float(cagr / effective_dd)
     return {"sharpe": sharpe, "cagr": cagr, "max_dd": max_dd, "calmar": calmar}
+
+
+def _signal_activity(signals: pd.Series, start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> Dict[str, float]:
+    if signals.empty:
+        return {"active_days": 0.0, "active_ratio": 0.0}
+
+    sig_df = signals.rename("signal").reset_index()
+    sig_df["timestamp"] = pd.to_datetime(sig_df["timestamp"], utc=True)
+    sig_df = sig_df[(sig_df["timestamp"] >= start_ts) & (sig_df["timestamp"] <= end_ts)]
+    if sig_df.empty:
+        return {"active_days": 0.0, "active_ratio": 0.0}
+
+    daily_active = sig_df.groupby("timestamp")["signal"].apply(lambda s: int((s != 0).any()))
+    active_days = float(daily_active.sum())
+    total_days = float(len(daily_active)) if len(daily_active) else 0.0
+    active_ratio = 0.0 if total_days <= 0 else active_days / total_days
+    return {"active_days": active_days, "active_ratio": active_ratio}
 
 
 def _file_sha256(path: str) -> str:
@@ -214,6 +232,10 @@ def train_one_strategy(
         result = strategy.generate(ohlcv, params)
         equity = _simple_backtest(ohlcv, result.signals, start_ts, end_ts, cost_bps=5.0)
         metrics = _metrics(equity)
+        activity = _signal_activity(result.signals, start_ts, end_ts)
+
+        if activity["active_days"] < 12 or activity["active_ratio"] < 0.01:
+            continue
 
         if train_spec.objective == "sharpe":
             score = metrics["sharpe"]
@@ -262,6 +284,7 @@ def train(
         summary["results"][strategy.name] = {
             "best_params": best_params,
             "best_metrics": best_metrics,
+            "signal_activity": _signal_activity(strategy.generate(ohlcv, best_params).signals, _to_utc_ts(train_spec.start), _to_utc_ts(train_spec.end)),
             "frozen_path": frozen_path,
         }
 
