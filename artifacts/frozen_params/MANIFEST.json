@@ -1,0 +1,15 @@
+{
+  "updated_at_utc": "2026-03-19T10:23:46.322083+00:00",
+  "strategies": {
+    "mean_reversion": {
+      "file": "artifacts/frozen_params/mean_reversion.json",
+      "sha256": "5c841c3cb5dba4f0962167616fe7bdebb622caeaeac0d094161890cdc889dd26",
+      "frozen_at_utc": "2026-03-19T10:23:46.321288+00:00"
+    },
+    "trend": {
+      "file": "artifacts/frozen_params/trend.json",
+      "sha256": "1aeb8b74869c8c1e53e5a8bb2a53e914ef1de07fad483fba974e4d0f40bc6c20",
+      "frozen_at_utc": "2026-03-19T10:23:40.295751+00:00"
+    }
+  }
+}

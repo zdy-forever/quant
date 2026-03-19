@@ -1,0 +1,37 @@
+{
+  "strategy": "mean_reversion",
+  "params": {
+    "lookback": 40,
+    "entry_z": 1.5,
+    "exit_z": 0.0,
+    "min_price": 5.0,
+    "top_k": 5
+  },
+  "train_spec": {
+    "symbols": [
+      "AAPL",
+      "MSFT",
+      "NVDA",
+      "AMZN",
+      "META",
+      "TSLA",
+      "GOOGL",
+      "AMD",
+      "NFLX",
+      "AVGO"
+    ],
+    "start": "2016-01-01",
+    "end": "2021-12-31",
+    "objective": "calmar",
+    "bars_timeframe": "1D",
+    "overwrite_frozen": true
+  },
+  "best_metrics": {
+    "sharpe": 0.505064939185344,
+    "cagr": 0.08017072781085255,
+    "max_dd": -0.21100943371569203,
+    "calmar": 0.3799390690678423
+  },
+  "frozen_at_utc": "2026-03-19T10:23:46.321288+00:00",
+  "note": "OOS/test 阶段严禁修改该文件；如策略失效，请整体重做。"
+}

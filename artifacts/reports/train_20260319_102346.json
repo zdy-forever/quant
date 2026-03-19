@@ -1,0 +1,57 @@
+{
+  "train_spec": {
+    "symbols": [
+      "AAPL",
+      "MSFT",
+      "NVDA",
+      "AMZN",
+      "META",
+      "TSLA",
+      "GOOGL",
+      "AMD",
+      "NFLX",
+      "AVGO"
+    ],
+    "start": "2016-01-01",
+    "end": "2021-12-31",
+    "objective": "calmar",
+    "bars_timeframe": "1D",
+    "overwrite_frozen": true
+  },
+  "results": {
+    "trend": {
+      "best_params": {
+        "breakout_window": 55,
+        "volume_window": 20,
+        "momentum_window": 60,
+        "min_price": 10.0,
+        "min_avg_dollar_volume": 5000000.0,
+        "min_volume_ratio": 1.2,
+        "top_k": 3
+      },
+      "best_metrics": {
+        "sharpe": 0.09074843443512587,
+        "cagr": 0.0016516081558988205,
+        "max_dd": -0.29469039389949325,
+        "calmar": 0.005604553762470152
+      },
+      "frozen_path": "artifacts/frozen_params/trend.json"
+    },
+    "mean_reversion": {
+      "best_params": {
+        "lookback": 40,
+        "entry_z": 1.5,
+        "exit_z": 0.0,
+        "min_price": 5.0,
+        "top_k": 5
+      },
+      "best_metrics": {
+        "sharpe": 0.505064939185344,
+        "cagr": 0.08017072781085255,
+        "max_dd": -0.21100943371569203,
+        "calmar": 0.3799390690678423
+      },
+      "frozen_path": "artifacts/frozen_params/mean_reversion.json"
+    }
+  }
+}

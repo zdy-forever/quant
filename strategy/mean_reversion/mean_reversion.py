@@ -61,14 +61,12 @@ class MeanReversionBollingerStrategy(BaseStrategy):
         min_price = float(params.get("min_price", 0.0))
         top_k = int(params.get("top_k", 5))
 
-        def _calc(group: pd.DataFrame) -> pd.DataFrame:
-            group = group.copy()
-            ma = group["close"].rolling(lookback).mean()
-            std = group["close"].rolling(lookback).std(ddof=0).replace(0.0, np.nan)
-            group["z"] = (group["close"] - ma) / std
-            return group
-
-        df = df.groupby("symbol", group_keys=False).apply(_calc)
+        grouped = df.groupby("symbol", group_keys=False)
+        ma = grouped["close"].transform(lambda s: s.rolling(lookback).mean())
+        std = grouped["close"].transform(
+            lambda s: s.rolling(lookback).std(ddof=0).replace(0.0, np.nan)
+        )
+        df["z"] = (df["close"] - ma) / std
 
         entry = (df["z"] < -entry_z) & (df["close"] >= min_price)
         score = (-df["z"]).replace([np.inf, -np.inf], np.nan).fillna(0.0)

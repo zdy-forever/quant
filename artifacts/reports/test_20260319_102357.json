@@ -1,0 +1,45 @@
+{
+  "test_spec": {
+    "symbols": [
+      "AAPL",
+      "MSFT",
+      "NVDA",
+      "AMZN",
+      "META",
+      "TSLA",
+      "GOOGL",
+      "AMD",
+      "NFLX",
+      "AVGO"
+    ],
+    "start": "2022-01-01",
+    "end": "2024-12-31",
+    "strategies": [
+      "trend",
+      "mean_reversion"
+    ],
+    "forbid_param_write": true
+  },
+  "strategies": {
+    "trend": {
+      "frozen_file": "artifacts/frozen_params/trend.json",
+      "oos_metrics": {
+        "sharpe": 1.0509786273209931,
+        "cagr": 0.1507345288236126,
+        "max_dd": -0.14624468738879393,
+        "calmar": 1.030700885713897
+      },
+      "equity_final": 1.521596168045879
+    },
+    "mean_reversion": {
+      "frozen_file": "artifacts/frozen_params/mean_reversion.json",
+      "oos_metrics": {
+        "sharpe": -0.6324739125612134,
+        "cagr": -0.1550781273247639,
+        "max_dd": -0.4498096037214514,
+        "calmar": -0.3447639313198227
+      },
+      "equity_final": 0.6042282535294338
+    }
+  }
+}

@@ -72,18 +72,19 @@ class TrendBreakoutStrategy(BaseStrategy):
         volume_window = int(params["volume_window"])
         momentum_window = int(params["momentum_window"])
 
-        def _calc(group: pd.DataFrame) -> pd.DataFrame:
-            group = group.copy()
-            group["ret_m"] = group["close"].pct_change(momentum_window)
-            group["high_breakout"] = group["high"].rolling(breakout_window).max().shift(1)
-            group["avg_volume"] = group["volume"].rolling(volume_window).mean().shift(1)
-            group["avg_dollar_volume"] = (
-                (group["close"] * group["volume"]).rolling(volume_window).mean().shift(1)
-            )
-            group["volume_ratio"] = group["volume"] / group["avg_volume"]
-            return group
-
-        df = df.groupby("symbol", group_keys=False).apply(_calc)
+        grouped = df.groupby("symbol", group_keys=False)
+        df["ret_m"] = grouped["close"].pct_change(momentum_window)
+        df["high_breakout"] = grouped["high"].transform(
+            lambda s: s.rolling(breakout_window).max().shift(1)
+        )
+        df["avg_volume"] = grouped["volume"].transform(
+            lambda s: s.rolling(volume_window).mean().shift(1)
+        )
+        df["dollar_volume"] = df["close"] * df["volume"]
+        df["avg_dollar_volume"] = grouped["dollar_volume"].transform(
+            lambda s: s.rolling(volume_window).mean().shift(1)
+        )
+        df["volume_ratio"] = df["volume"] / df["avg_volume"]
 
         min_price = float(params.get("min_price", 0.0))
         min_avg_dollar_volume = float(params.get("min_avg_dollar_volume", 0.0))

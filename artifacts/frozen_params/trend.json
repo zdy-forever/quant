@@ -1,0 +1,39 @@
+{
+  "strategy": "trend",
+  "params": {
+    "breakout_window": 55,
+    "volume_window": 20,
+    "momentum_window": 60,
+    "min_price": 10.0,
+    "min_avg_dollar_volume": 5000000.0,
+    "min_volume_ratio": 1.2,
+    "top_k": 3
+  },
+  "train_spec": {
+    "symbols": [
+      "AAPL",
+      "MSFT",
+      "NVDA",
+      "AMZN",
+      "META",
+      "TSLA",
+      "GOOGL",
+      "AMD",
+      "NFLX",
+      "AVGO"
+    ],
+    "start": "2016-01-01",
+    "end": "2021-12-31",
+    "objective": "calmar",
+    "bars_timeframe": "1D",
+    "overwrite_frozen": true
+  },
+  "best_metrics": {
+    "sharpe": 0.09074843443512587,
+    "cagr": 0.0016516081558988205,
+    "max_dd": -0.29469039389949325,
+    "calmar": 0.005604553762470152
+  },
+  "frozen_at_utc": "2026-03-19T10:23:40.295751+00:00",
+  "note": "OOS/test 阶段严禁修改该文件；如策略失效，请整体重做。"
+}
