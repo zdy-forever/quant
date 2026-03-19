@@ -1,5 +1,78 @@
 # Changes Log
 
+## 2026-03-19 1.0.9（pipeline 与正式研究）
+
+### 工程改动
+
+- 新增 [backtest/pipeline.py](backtest/pipeline.py)
+  - 把 `baseline screening -> optimize -> freeze -> OOS -> walk-forward -> alpha research` 串成一条正式研究流水线
+- 更新了 [main.py](main.py)
+  - 新增 `pipeline` 命令
+  - Alpaca 历史日线抓取改成分批请求
+  - 新增本地缓存目录 [artifacts/cache/ohlcv/](artifacts/cache/ohlcv/)
+- 更新了 [alpha_lab/research.py](alpha_lab/research.py)
+  - `Rank IC` 改成不依赖 `scipy` 的实现
+  - 修掉组合因子合成时的运行时警告
+- 更新了 [backtest/__init__.py](backtest/__init__.py)
+  - 去掉会引起循环导入的导出
+
+### 本次正式研究设置
+
+- 股票池：`135` 只
+- 优化窗口：`2016-01-01 -> 2021-12-31`
+- OOS 窗口：`2022-01-01 -> 2024-12-31`
+- Walk-forward 窗口：`2016-01-01 -> 2024-12-31`
+- 候选策略：
+  - `trend`
+  - `turtle`
+  - `low_vol_momentum`
+  - `mean_reversion`
+- 目标函数：`calmar`
+
+### 本次正式研究结果
+
+- 默认参数基线排序：
+  - `low_vol_momentum`
+  - `mean_reversion`
+  - `turtle`
+  - `trend`
+- 进入正式优化并冻结的策略：
+  - `low_vol_momentum`
+  - `turtle`
+  - `trend`
+- OOS 结果里目前相对最值得继续观察的是 `low_vol_momentum`
+  - `Sharpe = 0.08`
+  - `CAGR = -0.80%`
+  - `MaxDD = -37.36%`
+- `turtle` 和 `trend` 这轮 OOS 都偏弱，暂时不建议直接当主策略
+- Walk-forward 总体上：
+  - `low_vol_momentum` 接近走平
+  - `turtle`、`trend` 偶尔有亮点窗口，但整体稳定性还不够
+
+### Alpha 研究结果
+
+- 通过当前阈值筛出的因子：
+  - `low_volatility_20`
+  - `breakout_distance_20`
+- 当前最新 top picks：
+  - `CSCO`
+  - `MA`
+  - `BSX`
+  - `V`
+  - `KO`
+  - `AAPL`
+  - `TGT`
+  - `MCD`
+  - `GILD`
+  - `ABT`
+
+### 报告产物
+
+- 汇总 JSON：
+  - [artifacts/reports/pipeline_20260319_143550.json](artifacts/reports/pipeline_20260319_143550.json)
+- 汇总 Markdown：
+  - [artifacts/reports/pipeline_20260319_143550.md](artifacts/reports/pipeline_20260319_143550.md)
+
 ## 2026-03-19  1.0.7
 
 

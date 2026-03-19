@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from typing import TYPE_CHECKING, Dict, List
@@ -29,6 +30,8 @@ if TYPE_CHECKING:
 DEFAULT_SYMBOLS = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "GOOGL"]
 NY_TZ = ZoneInfo("America/New_York")
 FREE_PLAN_DELAY_MINUTES = 15
+OHLCV_CACHE_DIR = os.path.join("artifacts", "cache", "ohlcv")
+ALPACA_SYMBOL_CHUNK_SIZE = 50
 
 
 def load_runtime_config(path: str = "config/runtime.yaml") -> dict:
@@ -75,29 +78,72 @@ def get_alpaca_clients():
     return data_client, trading_client
 
 
-def fetch_daily_ohlcv(data_client, symbols: List[str], start: str, end: str) -> pd.DataFrame:
+def _chunk_symbols(symbols: List[str], chunk_size: int) -> List[List[str]]:
+    return [symbols[idx : idx + chunk_size] for idx in range(0, len(symbols), chunk_size)]
 
+
+def _ohlcv_cache_path(symbols: List[str], start: str, end: str) -> str:
+    normalized = sorted({symbol.upper() for symbol in symbols})
+    key = "|".join([start, end, ",".join(normalized)])
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+    os.makedirs(OHLCV_CACHE_DIR, exist_ok=True)
+    return os.path.join(OHLCV_CACHE_DIR, f"daily_{start}_{end}_{digest}.csv")
+
+
+def fetch_daily_ohlcv(data_client, symbols: List[str], start: str, end: str) -> pd.DataFrame:
+    """
+    抓取日线 OHLCV，并在本地做轻量缓存。
+
+    这样做有两个目的：
+    - 100+ 股票池时避免一次请求过大
+    - `pipeline`/`train`/`test` 重复跑时尽量复用本地结果
+    """
 
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
 
-    request_kwargs = {
-        "symbol_or_symbols": symbols,
-        "timeframe": TimeFrame.Day,
-        "start": pd.Timestamp(start, tz="UTC"),
-        "end": pd.Timestamp(end, tz="UTC"),
-    }
-    request = StockBarsRequest(**request_kwargs)
-    bars = data_client.get_stock_bars(request).df
-    if bars is None or bars.empty:
+    clean_symbols = sorted({symbol.upper() for symbol in symbols if str(symbol).strip()})
+    if not clean_symbols:
         return pd.DataFrame(columns=["timestamp", "symbol", "open", "high", "low", "close", "volume"])
 
-    df = bars.reset_index()
-    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-    df["symbol"] = df["symbol"].astype(str)
-    return df[["timestamp", "symbol", "open", "high", "low", "close", "volume"]].sort_values(
-        ["timestamp", "symbol"]
+    cache_path = _ohlcv_cache_path(clean_symbols, start, end)
+    if os.path.exists(cache_path):
+        cached = pd.read_csv(cache_path)
+        cached["timestamp"] = pd.to_datetime(cached["timestamp"], utc=True)
+        cached["symbol"] = cached["symbol"].astype(str)
+        return cached[["timestamp", "symbol", "open", "high", "low", "close", "volume"]].sort_values(
+            ["timestamp", "symbol"]
+        )
+
+    all_frames: List[pd.DataFrame] = []
+    for chunk in _chunk_symbols(clean_symbols, ALPACA_SYMBOL_CHUNK_SIZE):
+        request_kwargs = {
+            "symbol_or_symbols": chunk,
+            "timeframe": TimeFrame.Day,
+            "start": pd.Timestamp(start, tz="UTC"),
+            "end": pd.Timestamp(end, tz="UTC"),
+        }
+        request = StockBarsRequest(**request_kwargs)
+        bars = data_client.get_stock_bars(request).df
+        if bars is None or bars.empty:
+            continue
+
+        df = bars.reset_index()
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+        df["symbol"] = df["symbol"].astype(str)
+        all_frames.append(df[["timestamp", "symbol", "open", "high", "low", "close", "volume"]])
+
+    if not all_frames:
+        return pd.DataFrame(columns=["timestamp", "symbol", "open", "high", "low", "close", "volume"])
+
+    result = (
+        pd.concat(all_frames, ignore_index=True)
+        .drop_duplicates(subset=["timestamp", "symbol"], keep="last")
+        .sort_values(["timestamp", "symbol"])
+        .reset_index(drop=True)
     )
+    result.to_csv(cache_path, index=False)
+    return result
 
 
 def drop_unconfirmed_daily_bar_for_free_plan(
@@ -332,6 +378,52 @@ def cmd_alpha_research(args: argparse.Namespace) -> None:
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+def cmd_pipeline(args: argparse.Namespace) -> None:
+    from alpha_lab.research import AlphaResearchConfig
+    from backtest.engine import BacktestConfig
+    from backtest.pipeline import PipelineSpec, run_pipeline
+
+    data_client, _ = get_alpaca_clients()
+    symbols = load_symbols()
+    runtime = load_runtime_config()
+
+    backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    optimizer_cfg = runtime.get("optimizer", {}) or {}
+    alpha_cfg = runtime.get("alpha_lab", {}) or {}
+    research_cfg = AlphaResearchConfig(
+        forward_days=list(alpha_cfg.get("forward_days", [1, 5, 10, 20])),
+        quantiles=int(alpha_cfg.get("quantiles", 5)),
+        top_n=int(alpha_cfg.get("top_n", 10)),
+        min_ic=float(alpha_cfg.get("min_ic", 0.02)),
+        min_rank_ic=float(alpha_cfg.get("min_rank_ic", 0.03)),
+        backtest=backtest_cfg,
+    )
+
+    fetch_start = min(args.optimize_start, args.test_start, args.walk_forward_start)
+    fetch_end = max(args.optimize_end, args.test_end, args.walk_forward_end)
+    ohlcv = fetch_daily_ohlcv(data_client, symbols, fetch_start, fetch_end)
+
+    spec = PipelineSpec(
+        symbols=symbols,
+        optimize_start=args.optimize_start,
+        optimize_end=args.optimize_end,
+        test_start=args.test_start,
+        test_end=args.test_end,
+        walk_forward_start=args.walk_forward_start,
+        walk_forward_end=args.walk_forward_end,
+        objective=args.objective,
+        candidate_strategies=args.candidate_strategies,
+        max_strategies_to_optimize=args.max_strategies,
+        overwrite_frozen=args.overwrite_frozen,
+        walk_forward_train_years=args.train_years,
+        walk_forward_test_months=args.test_months,
+        walk_forward_step_months=args.step_months,
+        walk_forward_gap_days=args.gap_days,
+    )
+    result = run_pipeline(ohlcv, spec, backtest_cfg, optimizer_cfg, research_cfg)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 def cmd_deploy(args: argparse.Namespace) -> None:
     import pandas as pd
 
@@ -421,7 +513,7 @@ def cmd_deploy(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Modular Quant Trading Project (train/optimize/test/walk-forward/alpha-research/deploy)"
+        description="Modular Quant Trading Project (train/optimize/test/walk-forward/alpha-research/pipeline/deploy)"
     )
     subparsers = parser.add_subparsers(dest="cmd", required=True)
 
@@ -460,6 +552,31 @@ def build_parser() -> argparse.ArgumentParser:
     alpha_parser.add_argument("--start", required=True)
     alpha_parser.add_argument("--end", required=True)
     alpha_parser.set_defaults(fn=cmd_alpha_research)
+
+    pipeline_parser = subparsers.add_parser(
+        "pipeline",
+        help="Run baseline screening, optimize, freeze, OOS, walk-forward and alpha research in one pass",
+    )
+    pipeline_parser.add_argument("--optimize-start", required=True)
+    pipeline_parser.add_argument("--optimize-end", required=True)
+    pipeline_parser.add_argument("--test-start", required=True)
+    pipeline_parser.add_argument("--test-end", required=True)
+    pipeline_parser.add_argument("--walk-forward-start", required=True)
+    pipeline_parser.add_argument("--walk-forward-end", required=True)
+    pipeline_parser.add_argument(
+        "--candidate-strategies",
+        nargs="+",
+        default=["trend", "turtle", "pullback", "low_vol_momentum", "mean_reversion"],
+    )
+    pipeline_parser.add_argument("--objective", default="calmar", choices=["sharpe", "cagr", "calmar"])
+    pipeline_parser.add_argument("--max-strategies", type=int, default=3)
+    pipeline_parser.add_argument("--train-years", type=int, default=3)
+    pipeline_parser.add_argument("--test-months", type=int, default=6)
+    pipeline_parser.add_argument("--step-months", type=int, default=3)
+    pipeline_parser.add_argument("--gap-days", type=int, default=1)
+    pipeline_parser.add_argument("--overwrite-frozen", dest="overwrite_frozen", action="store_true")
+    pipeline_parser.add_argument("--no-overwrite-frozen", dest="overwrite_frozen", action="store_false")
+    pipeline_parser.set_defaults(fn=cmd_pipeline, overwrite_frozen=True)
 
     deploy_parser = subparsers.add_parser("deploy", help="Deploy frozen strategy to Alpaca paper trading")
     deploy_parser.add_argument("--dry-run", action="store_true", help="Do not actually submit orders")

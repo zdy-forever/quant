@@ -6,6 +6,7 @@
 - 100+ 只分散化的大盘优质股票池
 - 多策略研究、参数优化、冻结参数
 - OOS 测试与 Walk-forward 验证
+- 一键 `pipeline` 研究流程
 - 基于市场状态占比的策略混合持仓
 - Alpha 因子研究：IC / Rank IC / IC decay / Quantile / 组合因子 / 因子回测
 
@@ -67,6 +68,8 @@
   - 股票池和运行期配置
 - [artifacts/](artifacts/)
   - 冻结参数与各类报告
+- [artifacts/cache/](artifacts/cache/)
+  - 历史日线缓存
 - [tests/](tests/)
   - 基础测试
 
@@ -245,7 +248,38 @@ python main.py optimize --start 2016-01-01 --end 2021-12-31 --strategies trend t
 
 ---
 
-## 8. 训练、测试、Walk-forward
+## 8. 一键研究流程 + 训练、测试、Walk-forward
+
+如果你不是在单独调某一个模块，而是想正式做一轮完整研究，最推荐直接跑 `pipeline`：
+
+```bash
+conda activate quant
+python main.py pipeline --optimize-start 2016-01-01 --optimize-end 2021-12-31 --test-start 2022-01-01 --test-end 2024-12-31 --walk-forward-start 2016-01-01 --walk-forward-end 2024-12-31 --candidate-strategies trend turtle low_vol_momentum mean_reversion --objective calmar --max-strategies 3
+```
+
+这个命令会按顺序做：
+
+- 先用默认参数做基线体检
+- 自动筛出更值得优化的少数策略
+- 正式优化并冻结参数
+- 跑 OOS
+- 跑 Walk-forward
+- 跑 Alpha 因子研究
+- 最后输出汇总报告
+
+输出位置主要有：
+
+- [artifacts/frozen_params/](artifacts/frozen_params/)
+- [artifacts/reports/](artifacts/reports/)
+- [artifacts/cache/ohlcv/](artifacts/cache/ohlcv/)
+
+说明：
+
+- `pipeline` 会尽量复用本地缓存，减少重复请求 Alpaca 历史数据
+- 它更适合你做“正式研究批次”
+- 如果你只是调一个策略、一个时间段，单独跑 `optimize` / `train` / `test` 也可以
+
+下面这些单独命令依然保留，适合做局部研究。
 
 ### 训练并冻结参数
 
@@ -473,9 +507,9 @@ python -m pytest -q
 如果你现在是量化新手，最容易犯的错误不是代码写错，而是研究流程太激进。  
 最推荐的推进顺序是：
 
-1. 先只跑 `optimize -> train -> test`
-2. 再跑 `walk-forward`
-3. 再看 `alpha-research`
+1. 先跑一次 `pipeline`
+2. 看汇总报告里到底是哪条策略真的站得住
+3. 再单独细调某一条策略或某一组因子
 4. 最后才去 `deploy --dry-run`
 
 而且每次只改一小块：

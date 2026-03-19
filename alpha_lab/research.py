@@ -37,6 +37,10 @@ def _cross_sectional_corr(one_day: pd.DataFrame, factor_name: str, ret_name: str
     sample = one_day[[factor_name, ret_name]].dropna()
     if sample.shape[0] < 5:
         return np.nan
+    if method == "spearman":
+        ranked_factor = sample[factor_name].rank(method="average")
+        ranked_return = sample[ret_name].rank(method="average")
+        return float(ranked_factor.corr(ranked_return, method="pearson"))
     return float(sample[factor_name].corr(sample[ret_name], method=method))
 
 
@@ -135,8 +139,9 @@ def _build_composite_factor(panel: pd.DataFrame, selected_factors: List[str]) ->
         part = df.groupby("timestamp")[factor_name].transform(
             lambda s: (s - s.mean()) / (s.std(ddof=0) + 1e-12)
         )
-        normalized_parts.append(part)
-    composite = np.nanmean(np.vstack(normalized_parts), axis=0)
+        normalized_parts.append(part.rename(factor_name))
+    normalized_df = pd.concat(normalized_parts, axis=1)
+    composite = normalized_df.mean(axis=1, skipna=True).to_numpy()
     return pd.Series(
         composite,
         index=pd.MultiIndex.from_frame(df[["timestamp", "symbol"]], names=["timestamp", "symbol"]),
