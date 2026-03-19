@@ -5,6 +5,6 @@
 方便上层去切换策略或收紧风险。
 """
 
-from regime.detection import RegimeConfig, RegimeLabel, detect_regime
+from regime.detection import RegimeConfig, RegimeLabel, classify_regime_history, detect_regime, estimate_regime_mixture
 
-__all__ = ["RegimeConfig", "RegimeLabel", "detect_regime"]
+__all__ = ["RegimeConfig", "RegimeLabel", "classify_regime_history", "detect_regime", "estimate_regime_mixture"]

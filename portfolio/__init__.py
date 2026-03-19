@@ -6,5 +6,6 @@
 """
 
 from portfolio.position_sizing import PositionConfig, compute_weights_from_signals
+from portfolio.strategy_blend import StrategyBlendConfig, compute_strategy_allocations
 
-__all__ = ["PositionConfig", "compute_weights_from_signals"]
+__all__ = ["PositionConfig", "compute_weights_from_signals", "StrategyBlendConfig", "compute_strategy_allocations"]

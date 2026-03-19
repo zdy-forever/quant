@@ -2,27 +2,24 @@
 """
 样本外测试模块。
 
-这个文件的职责很单纯：
-- 读取已经冻结好的参数
-- 在新的时间区间上做 OOS 测试
-- 生成测试报告
-
-这里故意不允许重新搜索参数，因为 OOS 的目的就是检验训练结果能不能泛化。
+这里的职责是：
+- 读取冻结参数
+- 用统一回测引擎跑 OOS
+- 输出每个策略的样本外表现
 """
 from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import pandas as pd
 
-from backtest.train import FROZEN_DIR, REPORT_DIR, _file_sha256, _metrics, _simple_backtest
-from strategy.mean_reversion.mean_reversion import MeanReversionBollingerStrategy
-from strategy.pullback.pullback import PullbackMomentumStrategy
-from strategy.trend.trend import TrendBreakoutStrategy
+from backtest.engine import BacktestConfig, run_signal_backtest
+from backtest.optimizer import get_strategy_registry
+from backtest.train import FROZEN_DIR, REPORT_DIR, _file_sha256
 
 
 @dataclass(frozen=True)
@@ -32,6 +29,7 @@ class TestSpec:
     end: str
     strategies: List[str]
     forbid_param_write: bool = True
+    backtest: BacktestConfig = field(default_factory=BacktestConfig)
 
 
 def _to_utc_ts(value: str) -> pd.Timestamp:
@@ -58,34 +56,31 @@ def _snapshot_frozen_hashes() -> Dict[str, str]:
 
 def run_oos_test(ohlcv: pd.DataFrame, test_spec: TestSpec) -> Dict[str, Any]:
     os.makedirs(REPORT_DIR, exist_ok=True)
-
-    name_to_strategy = {
-        "trend": TrendBreakoutStrategy(),
-        "mean_reversion": MeanReversionBollingerStrategy(),
-        "pullback": PullbackMomentumStrategy(),
-    }
+    registry = get_strategy_registry()
 
     before_hashes = _snapshot_frozen_hashes() if test_spec.forbid_param_write else {}
     start_ts = _to_utc_ts(test_spec.start)
     end_ts = _to_utc_ts(test_spec.end)
 
-    results = {"test_spec": test_spec.__dict__, "strategies": {}}
+    sample = ohlcv.copy()
+    sample["timestamp"] = pd.to_datetime(sample["timestamp"], utc=True)
+    sample = sample[(sample["timestamp"] >= start_ts) & (sample["timestamp"] <= end_ts)].copy()
+
+    results = {"test_spec": asdict(test_spec), "strategies": {}}
     for name in test_spec.strategies:
-        if name not in name_to_strategy:
+        if name not in registry:
             raise ValueError(f"未知策略: {name}")
 
         payload = _load_frozen_params(name)
         params = payload["params"]
-
-        strategy = name_to_strategy[name]
-        result = strategy.generate(ohlcv, params)
-        equity = _simple_backtest(ohlcv, result.signals, start_ts, end_ts)
-        metrics = _metrics(equity)
+        strategy = registry[name]
+        generated = strategy.generate(sample, params)
+        bt_result = run_signal_backtest(sample, generated.signals, generated.score, test_spec.backtest)
 
         results["strategies"][name] = {
             "frozen_file": os.path.join(FROZEN_DIR, f"{name}.json"),
-            "oos_metrics": metrics,
-            "equity_final": float(equity.iloc[-1]) if not equity.empty else float("nan"),
+            "oos_metrics": bt_result["metrics"],
+            "equity_final": float(bt_result["equity_curve"].iloc[-1]) if not bt_result["equity_curve"].empty else float("nan"),
         }
 
     after_hashes = _snapshot_frozen_hashes() if test_spec.forbid_param_write else {}

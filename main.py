@@ -154,14 +154,6 @@ def load_frozen_params(strategy_name: str) -> Dict[str, float]:
     return payload["params"]
 
 
-def choose_strategy_by_regime(regime: RegimeLabel) -> str:
-    from regime.detection import RegimeLabel
-
-    if regime in (RegimeLabel.TREND_LOW_VOL, RegimeLabel.TREND_HIGH_VOL):
-        return "trend"
-    return "mean_reversion"
-
-
 def submit_bracket_orders(
     trading_client,
     weights: Dict[str, float],
@@ -207,12 +199,33 @@ def submit_bracket_orders(
             print(f"SUBMITTED {symbol}: {getattr(response, 'id', '-')}")
 
 
+def combine_stock_weights(
+    strategy_stock_weights: Dict[str, Dict[str, float]],
+    strategy_allocations: Dict[str, float],
+) -> Dict[str, float]:
+    """
+    把多个策略的股票权重按策略层资金配比合成一个组合。
+    """
+
+    combined: Dict[str, float] = {}
+    for strategy_name, stock_weights in strategy_stock_weights.items():
+        strategy_weight = float(strategy_allocations.get(strategy_name, 0.0))
+        if strategy_weight <= 0:
+            continue
+        for symbol, weight in stock_weights.items():
+            combined[symbol] = combined.get(symbol, 0.0) + strategy_weight * float(weight)
+    return combined
+
+
 def cmd_train(args: argparse.Namespace) -> None:
     from backtest.train import TrainSpec, train
+    from backtest.engine import BacktestConfig
 
     data_client, _ = get_alpaca_clients()
     symbols = load_symbols()
     ohlcv = fetch_daily_ohlcv(data_client, symbols, args.start, args.end)
+    runtime = load_runtime_config()
+    backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
 
     spec = TrainSpec(
         symbols=symbols,
@@ -220,29 +233,42 @@ def cmd_train(args: argparse.Namespace) -> None:
         end=args.end,
         objective=args.objective,
         overwrite_frozen=args.overwrite_frozen,
+        backtest=backtest_cfg,
     )
     result = train(ohlcv, spec, strategies=args.strategies)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def cmd_test(args: argparse.Namespace) -> None:
+    from backtest.engine import BacktestConfig
     from backtest.test import TestSpec, run_oos_test
 
     data_client, _ = get_alpaca_clients()
     symbols = load_symbols()
     ohlcv = fetch_daily_ohlcv(data_client, symbols, args.start, args.end)
+    runtime = load_runtime_config()
+    backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
 
-    spec = TestSpec(symbols=symbols, start=args.start, end=args.end, strategies=args.strategies)
+    spec = TestSpec(
+        symbols=symbols,
+        start=args.start,
+        end=args.end,
+        strategies=args.strategies,
+        backtest=backtest_cfg,
+    )
     result = run_oos_test(ohlcv, spec)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def cmd_walk_forward(args: argparse.Namespace) -> None:
+    from backtest.engine import BacktestConfig
     from backtest.walk_forward import WalkForwardSpec, run_walk_forward
 
     data_client, _ = get_alpaca_clients()
     symbols = load_symbols()
     ohlcv = fetch_daily_ohlcv(data_client, symbols, args.start, args.end)
+    runtime = load_runtime_config()
+    backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
 
     spec = WalkForwardSpec(
         symbols=symbols,
@@ -253,8 +279,56 @@ def cmd_walk_forward(args: argparse.Namespace) -> None:
         test_months=args.test_months,
         step_months=args.step_months,
         gap_days=args.gap_days,
+        backtest=backtest_cfg,
     )
     result = run_walk_forward(ohlcv, spec)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_optimize(args: argparse.Namespace) -> None:
+    from backtest.engine import BacktestConfig
+    from backtest.optimizer import OptimizationSpec, optimize_strategies
+
+    data_client, _ = get_alpaca_clients()
+    symbols = load_symbols()
+    ohlcv = fetch_daily_ohlcv(data_client, symbols, args.start, args.end)
+    runtime = load_runtime_config()
+
+    backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    opt_cfg = runtime.get("optimizer", {}) or {}
+    spec = OptimizationSpec(
+        start=args.start,
+        end=args.end,
+        objective=args.objective,
+        min_trade_count=int(opt_cfg.get("min_trade_count", 8)),
+        min_avg_active_positions=float(opt_cfg.get("min_avg_active_positions", 1.0)),
+        max_avg_turnover=float(opt_cfg.get("max_avg_turnover", 1.5)),
+        backtest=backtest_cfg,
+    )
+    result = optimize_strategies(ohlcv, args.strategies, spec)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_alpha_research(args: argparse.Namespace) -> None:
+    from alpha_lab.research import AlphaResearchConfig, run_alpha_research
+    from backtest.engine import BacktestConfig
+
+    data_client, _ = get_alpaca_clients()
+    symbols = load_symbols()
+    ohlcv = fetch_daily_ohlcv(data_client, symbols, args.start, args.end)
+    runtime = load_runtime_config()
+
+    alpha_cfg = runtime.get("alpha_lab", {}) or {}
+    backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    research_cfg = AlphaResearchConfig(
+        forward_days=list(alpha_cfg.get("forward_days", [1, 5, 10, 20])),
+        quantiles=int(alpha_cfg.get("quantiles", 5)),
+        top_n=int(alpha_cfg.get("top_n", 10)),
+        min_ic=float(alpha_cfg.get("min_ic", 0.02)),
+        min_rank_ic=float(alpha_cfg.get("min_rank_ic", 0.03)),
+        backtest=backtest_cfg,
+    )
+    result = run_alpha_research(ohlcv, research_cfg)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -262,15 +336,16 @@ def cmd_deploy(args: argparse.Namespace) -> None:
     import pandas as pd
 
     from portfolio.position_sizing import PositionConfig, compute_weights_from_signals
-    from regime.detection import RegimeConfig, RegimeLabel, detect_regime
+    from portfolio.strategy_blend import StrategyBlendConfig, compute_strategy_allocations
+    from backtest.optimizer import get_strategy_registry
+    from regime.detection import RegimeConfig, RegimeLabel, detect_regime, estimate_regime_mixture
     from risk.management import RiskConfig, clamp_weights
-    from strategy.mean_reversion.mean_reversion import MeanReversionBollingerStrategy
-    from strategy.trend.trend import TrendBreakoutStrategy
 
     runtime = load_runtime_config()
     regime_cfg = RegimeConfig(**(runtime.get("regime", {}) or {}))
     position_cfg = PositionConfig(**(runtime.get("position", {}) or {}))
     risk_cfg = RiskConfig(**(runtime.get("risk", {}) or {}))
+    blend_cfg = StrategyBlendConfig(**(runtime.get("strategy_mix", {}) or {}))
 
     data_client, trading_client = get_alpaca_clients()
     symbols = load_symbols()
@@ -284,23 +359,40 @@ def cmd_deploy(args: argparse.Namespace) -> None:
         raise RuntimeError("未获取到任何行情数据。")
 
     regime = detect_regime(ohlcv, regime_cfg)
+    regime_mix = estimate_regime_mixture(ohlcv, regime_cfg)
     print(f"Regime = {regime}")
+    print("Regime mix:", regime_mix)
 
     if regime == RegimeLabel.RANGE_HIGH_VOL and regime_cfg.no_trade_in_range_high_vol:
         print("Regime=RANGE_HIGH_VOL，按配置不交易。")
         return
 
-    chosen_strategy = choose_strategy_by_regime(regime)
-    strategy = (
-        TrendBreakoutStrategy() if chosen_strategy == "trend" else MeanReversionBollingerStrategy()
-    )
     trade_data = ohlcv[ohlcv["symbol"].isin(symbols)].copy()
-    params = load_frozen_params(chosen_strategy)
-    generated = strategy.generate(trade_data, params)
-
     asof_ts = pd.to_datetime(trade_data["timestamp"].max(), utc=True)
-    weights = compute_weights_from_signals(trade_data, generated.signals, position_cfg, asof_ts)
+    registry = get_strategy_registry()
+
+    available_strategies = [name for name in registry if os.path.exists(os.path.join("artifacts", "frozen_params", f"{name}.json"))]
+    strategy_allocations = compute_strategy_allocations(regime_mix, available_strategies, blend_cfg)
+    if not strategy_allocations:
+        print("当前没有可用的策略层资金分配。")
+        return
+
+    strategy_stock_weights: Dict[str, Dict[str, float]] = {}
+    for strategy_name, strategy_weight in strategy_allocations.items():
+        if strategy_weight <= 0:
+            continue
+        params = load_frozen_params(strategy_name)
+        generated = registry[strategy_name].generate(trade_data, params)
+        strategy_stock_weights[strategy_name] = compute_weights_from_signals(
+            trade_data,
+            generated.signals,
+            position_cfg,
+            asof_ts,
+        )
+
+    weights = combine_stock_weights(strategy_stock_weights, strategy_allocations)
     weights = clamp_weights(weights, risk_cfg)
+    print("Strategy allocations:", strategy_allocations)
     print("Target weights:", weights)
 
     if not weights:
@@ -329,33 +421,45 @@ def cmd_deploy(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Modular Quant Trading Project (train/test/walk-forward/deploy)"
+        description="Modular Quant Trading Project (train/optimize/test/walk-forward/alpha-research/deploy)"
     )
     subparsers = parser.add_subparsers(dest="cmd", required=True)
 
     train_parser = subparsers.add_parser("train", help="Train on in-sample data and freeze parameters")
     train_parser.add_argument("--start", required=True)
     train_parser.add_argument("--end", required=True)
-    train_parser.add_argument("--strategies", nargs="+", default=["trend", "mean_reversion", "pullback"])
+    train_parser.add_argument("--strategies", nargs="+", default=["trend", "turtle", "pullback", "low_vol_momentum", "mean_reversion"])
     train_parser.add_argument("--objective", default="sharpe", choices=["sharpe", "cagr", "calmar"])
     train_parser.add_argument("--overwrite-frozen", action="store_true")
     train_parser.set_defaults(fn=cmd_train)
 
+    optimize_parser = subparsers.add_parser("optimize", help="Search for the best strategy parameters")
+    optimize_parser.add_argument("--start", required=True)
+    optimize_parser.add_argument("--end", required=True)
+    optimize_parser.add_argument("--strategies", nargs="+", default=["trend", "turtle", "pullback", "low_vol_momentum", "mean_reversion"])
+    optimize_parser.add_argument("--objective", default="sharpe", choices=["sharpe", "cagr", "calmar"])
+    optimize_parser.set_defaults(fn=cmd_optimize)
+
     test_parser = subparsers.add_parser("test", help="Run immutable out-of-sample testing")
     test_parser.add_argument("--start", required=True)
     test_parser.add_argument("--end", required=True)
-    test_parser.add_argument("--strategies", nargs="+", default=["trend", "mean_reversion", "pullback"])
+    test_parser.add_argument("--strategies", nargs="+", default=["trend", "turtle", "pullback", "low_vol_momentum", "mean_reversion"])
     test_parser.set_defaults(fn=cmd_test)
 
     wf_parser = subparsers.add_parser("walk-forward", help="Run walk-forward validation")
     wf_parser.add_argument("--start", required=True)
     wf_parser.add_argument("--end", required=True)
-    wf_parser.add_argument("--strategies", nargs="+", default=["trend", "mean_reversion", "pullback"])
+    wf_parser.add_argument("--strategies", nargs="+", default=["trend", "turtle", "pullback", "low_vol_momentum", "mean_reversion"])
     wf_parser.add_argument("--train-years", type=int, default=3)
     wf_parser.add_argument("--test-months", type=int, default=6)
     wf_parser.add_argument("--step-months", type=int, default=3)
     wf_parser.add_argument("--gap-days", type=int, default=1)
     wf_parser.set_defaults(fn=cmd_walk_forward)
+
+    alpha_parser = subparsers.add_parser("alpha-research", help="Run IC/rank-IC/decay/quantile/composite factor research")
+    alpha_parser.add_argument("--start", required=True)
+    alpha_parser.add_argument("--end", required=True)
+    alpha_parser.set_defaults(fn=cmd_alpha_research)
 
     deploy_parser = subparsers.add_parser("deploy", help="Deploy frozen strategy to Alpaca paper trading")
     deploy_parser.add_argument("--dry-run", action="store_true", help="Do not actually submit orders")

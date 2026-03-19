@@ -5,24 +5,24 @@ Walk-forward 验证模块。
 单次 OOS 测试看的是“某一段时间”；
 Walk-forward 看的是“很多连续时间窗口”里是否都还能站得住。
 
-如果你发现单次测试很好，但不同窗口差异很大，通常意味着策略稳定性不足。
-所以这个文件更像是策略上线前的体检工具。
+它和 train 最大的区别是：
+- 不重新优化参数
+- 只拿冻结参数在不同连续窗口上做稳定性体检
 """
 from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import pandas as pd
 
+from backtest.engine import BacktestConfig, run_signal_backtest
+from backtest.optimizer import get_strategy_registry
 from backtest.test import _load_frozen_params
-from backtest.train import REPORT_DIR, _metrics, _simple_backtest
-from strategy.mean_reversion.mean_reversion import MeanReversionBollingerStrategy
-from strategy.pullback.pullback import PullbackMomentumStrategy
-from strategy.trend.trend import TrendBreakoutStrategy
+from backtest.train import REPORT_DIR
 
 
 @dataclass(frozen=True)
@@ -35,6 +35,7 @@ class WalkForwardSpec:
     test_months: int = 6
     step_months: int = 3
     gap_days: int = 1
+    backtest: BacktestConfig = field(default_factory=BacktestConfig)
 
 
 def _to_utc_ts(value: str) -> pd.Timestamp:
@@ -46,28 +47,24 @@ def _month_add(ts: pd.Timestamp, months: int) -> pd.Timestamp:
 
 
 def run_walk_forward(ohlcv: pd.DataFrame, wf: WalkForwardSpec) -> Dict[str, Any]:
-    """参数冻结后做连续 OOS 窗口体检。"""
-
     os.makedirs(REPORT_DIR, exist_ok=True)
+    registry = get_strategy_registry()
 
-    name_to_strategy = {
-        "trend": TrendBreakoutStrategy(),
-        "mean_reversion": MeanReversionBollingerStrategy(),
-        "pullback": PullbackMomentumStrategy(),
-    }
+    sample = ohlcv.copy()
+    sample["timestamp"] = pd.to_datetime(sample["timestamp"], utc=True)
 
     start_ts = _to_utc_ts(wf.start)
     end_ts = _to_utc_ts(wf.end)
-    results = {"walk_forward_spec": wf.__dict__, "strategies": {}}
+    results = {"walk_forward_spec": asdict(wf), "strategies": {}}
 
     for name in wf.strategies:
-        if name not in name_to_strategy:
+        if name not in registry:
             raise ValueError(f"未知策略: {name}")
 
         payload = _load_frozen_params(name)
         params = payload["params"]
-        strategy = name_to_strategy[name]
-        generated = strategy.generate(ohlcv, params)
+        strategy = registry[name]
+        generated = strategy.generate(sample, params)
 
         windows = []
         equity_all = pd.Series(dtype=float)
@@ -80,13 +77,15 @@ def run_walk_forward(ohlcv: pd.DataFrame, wf: WalkForwardSpec) -> Dict[str, Any]
             if test_end > end_ts:
                 break
 
-            equity = _simple_backtest(ohlcv, generated.signals, test_start, test_end)
-            metrics = _metrics(equity)
+            window_sample = sample[(sample["timestamp"] >= test_start) & (sample["timestamp"] <= test_end)].copy()
+            bt_result = run_signal_backtest(window_sample, generated.signals, generated.score, wf.backtest)
+            equity = bt_result["equity_curve"]
+
             windows.append(
                 {
                     "train_window": [str(cursor.date()), str(train_end.date())],
                     "test_window": [str(test_start.date()), str(test_end.date())],
-                    "metrics": metrics,
+                    "metrics": bt_result["metrics"],
                     "equity_final": float(equity.iloc[-1]) if not equity.empty else float("nan"),
                 }
             )
@@ -97,10 +96,24 @@ def run_walk_forward(ohlcv: pd.DataFrame, wf: WalkForwardSpec) -> Dict[str, Any]
 
             cursor = _month_add(cursor, wf.step_months)
 
+        overall_metrics = {}
+        if not equity_all.empty:
+            overall_returns = equity_all.pct_change().dropna()
+            peak = equity_all.cummax()
+            max_dd = float((equity_all / peak - 1.0).min())
+            years = max((equity_all.index[-1] - equity_all.index[0]).days / 365.25, 1e-9)
+            cagr = float((equity_all.iloc[-1] / equity_all.iloc[0]) ** (1.0 / years) - 1.0)
+            overall_metrics = {
+                "sharpe": float(overall_returns.mean() / (overall_returns.std(ddof=0) + 1e-12) * (252.0 ** 0.5)),
+                "cagr": cagr,
+                "max_dd": max_dd,
+                "calmar": float(cagr / (abs(max_dd) + 1e-12)),
+            }
+
         results["strategies"][name] = {
             "frozen_file": os.path.join("artifacts", "frozen_params", f"{name}.json"),
             "windows": windows,
-            "overall_metrics": _metrics(equity_all) if not equity_all.empty else {},
+            "overall_metrics": overall_metrics,
         }
 
     report_path = os.path.join(
