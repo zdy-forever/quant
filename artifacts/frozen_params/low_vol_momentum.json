@@ -2,13 +2,13 @@
   "strategy": "low_vol_momentum",
   "params": {
     "short_momentum_window": 40,
-    "long_momentum_window": 160,
-    "trend_window": 100,
+    "long_momentum_window": 80,
+    "trend_window": 200,
     "vol_window": 20,
     "max_daily_volatility": 0.03,
     "min_price": 10.0,
     "min_avg_dollar_volume": 10000000.0,
-    "top_k": 3
+    "top_k": 8
   },
   "train_spec": {
     "symbols": [
@@ -169,16 +169,16 @@
     }
   },
   "best_metrics": {
-    "sharpe": 0.7018888491638571,
-    "sortino": 0.8788486033671296,
-    "cagr": 0.15957826918179885,
-    "max_dd": -0.273254552809028,
-    "calmar": 0.5839912548236327,
-    "annual_vol": 0.258933306316304,
-    "avg_turnover": 0.3423841059602649,
-    "avg_active_positions": 2.543708609271523,
-    "trade_count": 405.0
+    "sharpe": 0.9360177780755042,
+    "sortino": 1.1753316418964215,
+    "cagr": 0.16902140074114413,
+    "max_dd": -0.2288382746372043,
+    "calmar": 0.7386063411305156,
+    "annual_vol": 0.18530000143827724,
+    "avg_turnover": 0.3271144749290445,
+    "avg_active_positions": 7.241721854304636,
+    "trade_count": 1035.0
   },
-  "frozen_at_utc": "2026-03-19T14:08:15.374446+00:00",
+  "frozen_at_utc": "2026-03-19T22:42:18.402267+00:00",
   "note": "样本外测试和部署阶段严禁直接修改该文件。"
 }

@@ -6,12 +6,14 @@
 - 价格突破过去一段时间高点
 - 当天成交量明显放大
 - 中期收益率为正，说明趋势不是随机噪声
+- 用 VIX 代理过滤掉恐慌明显抬升的环境
 
 如果你想微调趋势策略，最先看的通常是：
 - `breakout_window`
 - `volume_window`
 - `momentum_window`
 - `min_volume_ratio`
+- `max_vix_ma_ratio`
 - `top_k`
 """
 from __future__ import annotations
@@ -52,6 +54,11 @@ class TrendBreakoutStrategy(BaseStrategy):
             "min_price": 10.0,
             "min_avg_dollar_volume": 5_000_000.0,
             "min_volume_ratio": 1.5,
+            "use_vix_filter": True,
+            "vix_symbol": "VIXY",
+            "vix_window": 20,
+            "max_vix_close": 0.0,
+            "max_vix_ma_ratio": 1.10,
             "top_k": 5,
         }
 
@@ -80,24 +87,51 @@ class TrendBreakoutStrategy(BaseStrategy):
         trend_filter_window = int(params.get("trend_filter_window", 100))
         volatility_window = int(params.get("volatility_window", 20))
         max_daily_volatility = float(params.get("max_daily_volatility", 1.0))
+        use_vix_filter = bool(params.get("use_vix_filter", True))
+        vix_symbol = str(params.get("vix_symbol", "VIXY")).upper()
+        vix_window = int(params.get("vix_window", 20))
+        max_vix_close = float(params.get("max_vix_close", 0.0))
+        max_vix_ma_ratio = float(params.get("max_vix_ma_ratio", 1.10))
 
-        grouped = df.groupby("symbol", group_keys=False)
-        df["ret_m"] = grouped["close"].pct_change(momentum_window)
-        df["high_breakout"] = grouped["high"].transform(
+        vix_col = f"ref_close_{vix_symbol}"
+        trade_df = df[df["symbol"] != vix_symbol].copy()
+        grouped = trade_df.groupby("symbol", group_keys=False)
+
+        trade_df["ret_m"] = grouped["close"].pct_change(momentum_window)
+        trade_df["high_breakout"] = grouped["high"].transform(
             lambda s: s.rolling(breakout_window).max().shift(1)
         )
-        df["avg_volume"] = grouped["volume"].transform(
+        trade_df["avg_volume"] = grouped["volume"].transform(
             lambda s: s.rolling(volume_window).mean().shift(1)
         )
-        df["dollar_volume"] = df["close"] * df["volume"]
-        df["avg_dollar_volume"] = grouped["dollar_volume"].transform(
+        trade_df["dollar_volume"] = trade_df["close"] * trade_df["volume"]
+        grouped = trade_df.groupby("symbol", group_keys=False)
+        trade_df["avg_dollar_volume"] = grouped["dollar_volume"].transform(
             lambda s: s.rolling(volume_window).mean().shift(1)
         )
-        df["volume_ratio"] = df["volume"] / df["avg_volume"]
-        df["trend_ma"] = grouped["close"].transform(lambda s: s.rolling(trend_filter_window).mean())
-        df["daily_volatility"] = grouped["close"].transform(
+        trade_df["volume_ratio"] = trade_df["volume"] / trade_df["avg_volume"]
+        trade_df["trend_ma"] = grouped["close"].transform(lambda s: s.rolling(trend_filter_window).mean())
+        trade_df["daily_volatility"] = grouped["close"].transform(
             lambda s: s.pct_change().rolling(volatility_window).std(ddof=0)
         )
+        if use_vix_filter and vix_col in trade_df.columns:
+            trade_df["vix_close"] = pd.to_numeric(trade_df[vix_col], errors="coerce")
+            vix_frame = (
+                trade_df[["timestamp", "vix_close"]]
+                .drop_duplicates(subset=["timestamp"])
+                .sort_values("timestamp")
+            )
+            vix_frame["vix_ma"] = vix_frame["vix_close"].rolling(vix_window).mean()
+            vix_frame["vix_ma_ratio"] = vix_frame["vix_close"] / vix_frame["vix_ma"].replace(0.0, np.nan)
+            trade_df = trade_df.drop(columns=["vix_close"], errors="ignore").merge(
+                vix_frame,
+                on="timestamp",
+                how="left",
+            )
+        else:
+            trade_df["vix_close"] = np.nan
+            trade_df["vix_ma"] = np.nan
+            trade_df["vix_ma_ratio"] = np.nan
 
         min_price = float(params.get("min_price", 0.0))
         min_avg_dollar_volume = float(params.get("min_avg_dollar_volume", 0.0))
@@ -105,23 +139,29 @@ class TrendBreakoutStrategy(BaseStrategy):
         top_k = int(params["top_k"])
 
         signal_mask = (
-            (df["close"] >= min_price)
-            & (df["avg_dollar_volume"] >= min_avg_dollar_volume)
-            & (df["close"] > df["high_breakout"])
-            & (df["volume_ratio"] >= min_volume_ratio)
-            & (df["ret_m"] > 0)
-            & ((df["trend_ma"].isna()) | (df["close"] >= df["trend_ma"]))
-            & ((df["daily_volatility"].isna()) | (df["daily_volatility"] <= max_daily_volatility))
+            (trade_df["close"] >= min_price)
+            & (trade_df["avg_dollar_volume"] >= min_avg_dollar_volume)
+            & (trade_df["close"] > trade_df["high_breakout"])
+            & (trade_df["volume_ratio"] >= min_volume_ratio)
+            & (trade_df["ret_m"] > 0)
+            & ((trade_df["trend_ma"].isna()) | (trade_df["close"] >= trade_df["trend_ma"]))
+            & ((trade_df["daily_volatility"].isna()) | (trade_df["daily_volatility"] <= max_daily_volatility))
         )
+        if use_vix_filter:
+            vix_ok = trade_df["vix_ma_ratio"].isna() | (trade_df["vix_ma_ratio"] <= max_vix_ma_ratio)
+            if max_vix_close > 0:
+                vix_ok &= trade_df["vix_close"].isna() | (trade_df["vix_close"] <= max_vix_close)
+            signal_mask &= vix_ok
 
         score = (
-            0.6 * df["ret_m"].fillna(0.0)
-            + 0.2 * df["volume_ratio"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
-            + 0.2 * (1.0 - df["daily_volatility"].replace([np.inf, -np.inf], np.nan).fillna(1.0))
+            0.55 * trade_df["ret_m"].fillna(0.0)
+            + 0.20 * trade_df["volume_ratio"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            + 0.15 * (1.0 - trade_df["daily_volatility"].replace([np.inf, -np.inf], np.nan).fillna(1.0))
+            + 0.10 * (1.0 - trade_df["vix_ma_ratio"].replace([np.inf, -np.inf], np.nan).fillna(1.0))
         )
 
         idx = pd.MultiIndex.from_frame(
-            df[["timestamp", "symbol"]],
+            trade_df[["timestamp", "symbol"]],
             names=["timestamp", "symbol"],
         )
         raw_signal = pd.Series(signal_mask.astype(int).values, index=idx, name="signal_raw")

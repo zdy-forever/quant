@@ -1,15 +1,20 @@
 {
   "strategy": "trend",
   "params": {
-    "breakout_window": 55,
+    "breakout_window": 20,
     "volume_window": 20,
     "momentum_window": 60,
     "trend_filter_window": 100,
     "volatility_window": 20,
-    "max_daily_volatility": 0.08,
+    "max_daily_volatility": 0.06,
     "min_price": 10.0,
     "min_avg_dollar_volume": 5000000.0,
     "min_volume_ratio": 1.2,
+    "use_vix_filter": true,
+    "vix_symbol": "VIXY",
+    "vix_window": 20,
+    "max_vix_close": 0.0,
+    "max_vix_ma_ratio": 1.1,
     "top_k": 5
   },
   "train_spec": {
@@ -171,16 +176,16 @@
     }
   },
   "best_metrics": {
-    "sharpe": -0.22642090256747066,
-    "sortino": -0.2871448508030927,
-    "cagr": -0.07108883761453044,
-    "max_dd": -0.47064008658818535,
-    "calmar": -0.15104713695283425,
-    "annual_vol": 0.21965976455487746,
-    "avg_turnover": 1.2330684326710817,
-    "avg_active_positions": 2.2198675496688742,
-    "trade_count": 1723.0
+    "sharpe": 0.041541020277106495,
+    "sortino": 0.059532100766943624,
+    "cagr": -0.011574600473649332,
+    "max_dd": -0.3585643326789987,
+    "calmar": -0.03228040108489849,
+    "annual_vol": 0.20151731581618723,
+    "avg_turnover": 1.2546578366445915,
+    "avg_active_positions": 2.4589403973509936,
+    "trade_count": 1940.0
   },
-  "frozen_at_utc": "2026-03-19T14:33:01.037716+00:00",
+  "frozen_at_utc": "2026-03-19T23:10:39.443783+00:00",
   "note": "样本外测试和部署阶段严禁直接修改该文件。"
 }

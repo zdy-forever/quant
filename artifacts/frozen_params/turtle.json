@@ -1,8 +1,8 @@
 {
   "strategy": "turtle",
   "params": {
-    "entry_window": 80,
-    "trend_window": 80,
+    "entry_window": 20,
+    "trend_window": 160,
     "atr_window": 14,
     "max_atr_pct": 0.05,
     "min_price": 10.0,
@@ -168,16 +168,16 @@
     }
   },
   "best_metrics": {
-    "sharpe": 0.016283356801278803,
-    "sortino": 0.019435093070876337,
-    "cagr": -0.018534872623107934,
-    "max_dd": -0.38090284374091443,
-    "calmar": -0.048660368195272585,
-    "annual_vol": 0.21028737314493579,
-    "avg_turnover": 1.2339955849889626,
-    "avg_active_positions": 2.1635761589403972,
-    "trade_count": 1173.0
+    "sharpe": 0.06300176983501189,
+    "sortino": 0.08367288569475029,
+    "cagr": -0.0075865159158508,
+    "max_dd": -0.321597997008614,
+    "calmar": -0.02359005959736747,
+    "annual_vol": 0.2011528930645927,
+    "avg_turnover": 1.3684326710816774,
+    "avg_active_positions": 2.4927152317880794,
+    "trade_count": 1517.0
   },
-  "frozen_at_utc": "2026-03-19T14:19:01.725546+00:00",
+  "frozen_at_utc": "2026-03-19T22:55:03.421894+00:00",
   "note": "样本外测试和部署阶段严禁直接修改该文件。"
 }

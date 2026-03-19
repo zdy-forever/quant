@@ -1,10 +1,10 @@
 {
-  "updated_at_utc": "2026-03-19T14:33:01.038960+00:00",
+  "updated_at_utc": "2026-03-19T23:10:39.449619+00:00",
   "strategies": {
     "low_vol_momentum": {
       "file": "artifacts\\frozen_params\\low_vol_momentum.json",
-      "sha256": "912b81e5858bc2643e81143c3c3a11835cff1ee02f80316ef1932dc5c3a57e4f",
-      "frozen_at_utc": "2026-03-19T14:08:15.374446+00:00"
+      "sha256": "591ff1387303261912d0cba4e34e91f88a235c19b65469b6025cb9e59d1fbb55",
+      "frozen_at_utc": "2026-03-19T22:42:18.402267+00:00"
     },
     "mean_reversion": {
       "file": "artifacts\\frozen_params\\mean_reversion.json",
@@ -18,13 +18,13 @@
     },
     "trend": {
       "file": "artifacts\\frozen_params\\trend.json",
-      "sha256": "5b2964e50e7d1cdbd5f2de55954093b56a794d9c9894ebc1c58b61ae200ab714",
-      "frozen_at_utc": "2026-03-19T14:33:01.037716+00:00"
+      "sha256": "980787c0a73d25d5641926413aa003e418d71b209b80d89df43e73f2fa5614cd",
+      "frozen_at_utc": "2026-03-19T23:10:39.443783+00:00"
     },
     "turtle": {
       "file": "artifacts\\frozen_params\\turtle.json",
-      "sha256": "c723691e03be9ce55a76867849dae855c2e9b6a7046cfc3b4d45b119af78342c",
-      "frozen_at_utc": "2026-03-19T14:19:01.725546+00:00"
+      "sha256": "0da5a5812da08a75f83aad87b23a132f81ad886a15141f81881a2f9eddb66f88",
+      "frozen_at_utc": "2026-03-19T22:55:03.421894+00:00"
     }
   }
 }

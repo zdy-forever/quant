@@ -1,5 +1,79 @@
 # Changes Log
 
+## 2026-03-20 1.0.10（VIX 过滤、all/raw 拆分、邮件通知）
+
+### 策略与数据口径
+
+- 更新了 [strategy/trend/trend.py](strategy/trend/trend.py)
+  - 趋势策略新增 `VIX` 代理过滤
+  - 默认使用 `VIXY` 作为可交易波动率 proxy
+  - 新增参数：
+    - `use_vix_filter`
+    - `vix_symbol`
+    - `vix_window`
+    - `max_vix_close`
+    - `max_vix_ma_ratio`
+- 更新了 [main.py](main.py)
+  - 研究类命令统一走 `research_bar_adjustment = all`
+  - `deploy` 里真正用于执行定价、止损、止盈的价格，单独走 `execution_bar_adjustment = raw`
+  - 现在是：
+    - 研究/回测/因子分析：优先 `all`
+    - 第二天委托价格与风控价格：改用 `raw`
+- 更新了 [config/runtime.yaml](config/runtime.yaml)
+  - 新增：
+    - `data.research_bar_adjustment`
+    - `data.execution_bar_adjustment`
+
+### 参考行情与邮件通知
+
+- 新增 [notifications/](notifications/)
+- 新增 [notifications/emailer.py](notifications/emailer.py)
+  - 回测研究结果自动邮件通知
+  - 因子研究结果自动邮件通知
+  - `deploy` 自动拆成两封邮件：
+    - Alpaca 模拟盘动作
+    - IBKR 手动执行建议
+  - 默认发件人显示名：`财政小助手mina`
+- 更新了 [main.py](main.py)
+  - 各命令完成后自动尝试发邮件
+  - 命令失败时自动尝试发失败告警邮件
+  - 优化了邮件内容长度，减少超时概率
+- 更新了 [notifications/emailer.py](notifications/emailer.py)
+  - 自动识别 `465 -> SSL`
+  - 已用你当前的 `QQ SMTP` 配置完成一封测试邮件验证
+
+### 本次重新回测（VIX + all）
+
+- 重新运行了正式研究流水线
+- 新报告：
+  - [artifacts/reports/pipeline_20260319_231349.json](artifacts/reports/pipeline_20260319_231349.json)
+  - [artifacts/reports/pipeline_20260319_231349.md](artifacts/reports/pipeline_20260319_231349.md)
+- 当前基线排序仍然是：
+  - `low_vol_momentum`
+  - `mean_reversion`
+  - `turtle`
+  - `trend`
+- 进入正式优化的仍然是：
+  - `low_vol_momentum`
+  - `turtle`
+  - `trend`
+
+### 这次回测后的结论
+
+- `trend` 加入 `VIX` 代理过滤后，训练期表现比上一版略有改善，但 OOS 依然偏弱
+- `low_vol_momentum` 训练期最强，但这次 OOS 明显走弱，说明它对数据口径和样本窗口仍然比较敏感
+- Alpha 因子筛选结果仍然主要指向：
+  - `low_volatility_20`
+  - `breakout_distance_20`
+- 说明这套系统更像“研究筛选器”，还没有到“稳定执行模板”的状态
+
+### 文档
+
+- 更新了 [README.md](README.md)
+  - 写清楚 `all` 和 `raw` 的分工
+  - 写清楚趋势里的 `VIX` 代理过滤
+  - 写清楚自动邮件通知和邮件标题类型
+
 ## 2026-03-19 1.0.9（pipeline 与正式研究）
 
 ### 工程改动

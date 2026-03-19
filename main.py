@@ -19,7 +19,7 @@ import argparse
 import hashlib
 import json
 import os
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 from zoneinfo import ZoneInfo
 import pandas as pd
 
@@ -32,6 +32,17 @@ NY_TZ = ZoneInfo("America/New_York")
 FREE_PLAN_DELAY_MINUTES = 15
 OHLCV_CACHE_DIR = os.path.join("artifacts", "cache", "ohlcv")
 ALPACA_SYMBOL_CHUNK_SIZE = 50
+DEFAULT_BAR_ADJUSTMENT = "all"
+
+
+def get_research_adjustment(runtime: dict) -> str:
+    data_cfg = runtime.get("data", {}) or {}
+    return str(data_cfg.get("research_bar_adjustment", data_cfg.get("bar_adjustment", "all")))
+
+
+def get_execution_adjustment(runtime: dict) -> str:
+    data_cfg = runtime.get("data", {}) or {}
+    return str(data_cfg.get("execution_bar_adjustment", "raw"))
 
 
 def load_runtime_config(path: str = "config/runtime.yaml") -> dict:
@@ -82,15 +93,117 @@ def _chunk_symbols(symbols: List[str], chunk_size: int) -> List[List[str]]:
     return [symbols[idx : idx + chunk_size] for idx in range(0, len(symbols), chunk_size)]
 
 
-def _ohlcv_cache_path(symbols: List[str], start: str, end: str) -> str:
+def _ohlcv_cache_path(symbols: List[str], start: str, end: str, adjustment: str) -> str:
     normalized = sorted({symbol.upper() for symbol in symbols})
-    key = "|".join([start, end, ",".join(normalized)])
+    key = "|".join([start, end, adjustment.lower(), ",".join(normalized)])
     digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
     os.makedirs(OHLCV_CACHE_DIR, exist_ok=True)
-    return os.path.join(OHLCV_CACHE_DIR, f"daily_{start}_{end}_{digest}.csv")
+    return os.path.join(OHLCV_CACHE_DIR, f"daily_{start}_{end}_{adjustment.lower()}_{digest}.csv")
 
 
-def fetch_daily_ohlcv(data_client, symbols: List[str], start: str, end: str) -> pd.DataFrame:
+def collect_reference_symbols(
+    strategy_names: List[str] | None = None,
+    use_frozen_params: bool = False,
+) -> List[str]:
+    """
+    收集策略依赖的参考行情符号。
+
+    这些符号只用于生成参考列，例如 VIX 代理，不会被当成可交易股票。
+    """
+
+    from backtest.optimizer import get_strategy_registry
+
+    registry = get_strategy_registry()
+    refs: set[str] = set()
+
+    for strategy_name in strategy_names or []:
+        params: Dict[str, Any] | None = None
+        if use_frozen_params:
+            try:
+                params = load_frozen_params(strategy_name)
+            except FileNotFoundError:
+                params = None
+        if params is None and strategy_name in registry:
+            params = registry[strategy_name].default_params()
+        if not params:
+            continue
+
+        vix_symbol = str(params.get("vix_symbol", "")).strip().upper()
+        if vix_symbol:
+            refs.add(vix_symbol)
+
+    return sorted(refs)
+
+
+def prepare_trade_ohlcv(
+    full_ohlcv: pd.DataFrame,
+    trade_symbols: List[str],
+    reference_symbols: List[str] | None = None,
+) -> pd.DataFrame:
+    """
+    把参考行情按日期合并回交易股票面板。
+
+    例如会把 `VIXY` 的收盘价展开成 `ref_close_VIXY` 列，
+    这样策略能读到它，但回测不会把它当成可交易股票。
+    """
+
+    df = full_ohlcv.copy()
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    trade_set = {symbol.upper() for symbol in trade_symbols}
+    result = df[df["symbol"].isin(trade_set)].copy()
+
+    for ref_symbol in reference_symbols or []:
+        ref_col = f"ref_close_{ref_symbol.upper()}"
+        ref_frame = (
+            df[df["symbol"] == ref_symbol.upper()][["timestamp", "close"]]
+            .drop_duplicates(subset=["timestamp"])
+            .rename(columns={"close": ref_col})
+        )
+        result = result.merge(ref_frame, on="timestamp", how="left")
+
+    return result.sort_values(["timestamp", "symbol"]).reset_index(drop=True)
+
+
+def _notify_research(command_name: str, payload: Dict[str, Any]) -> None:
+    from notifications import send_research_notification
+
+    try:
+        sent = send_research_notification(command_name, payload)
+        if not sent:
+            print("[WARN] Email notification skipped because SMTP env vars are incomplete.")
+    except Exception as exc:
+        print(f"[WARN] Failed to send email notification for {command_name}: {exc}")
+
+
+def _notify_deploy(payload: Dict[str, Any]) -> None:
+    from notifications import send_deploy_notifications
+
+    try:
+        sent = send_deploy_notifications(payload)
+        if not sent:
+            print("[WARN] Email notification skipped because SMTP env vars are incomplete.")
+    except Exception as exc:
+        print(f"[WARN] Failed to send deploy emails: {exc}")
+
+
+def _notify_failure(command_name: str, exc: Exception) -> None:
+    from notifications import send_failure_notification
+
+    try:
+        sent = send_failure_notification(command_name, str(exc))
+        if not sent:
+            print("[WARN] Failure email skipped because SMTP env vars are incomplete.")
+    except Exception as email_exc:
+        print(f"[WARN] Failed to send failure email for {command_name}: {email_exc}")
+
+
+def fetch_daily_ohlcv(
+    data_client,
+    symbols: List[str],
+    start: str,
+    end: str,
+    adjustment: str = DEFAULT_BAR_ADJUSTMENT,
+) -> pd.DataFrame:
     """
     抓取日线 OHLCV，并在本地做轻量缓存。
 
@@ -99,6 +212,7 @@ def fetch_daily_ohlcv(data_client, symbols: List[str], start: str, end: str) -> 
     - `pipeline`/`train`/`test` 重复跑时尽量复用本地结果
     """
 
+    from alpaca.data.enums import Adjustment
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
 
@@ -106,7 +220,8 @@ def fetch_daily_ohlcv(data_client, symbols: List[str], start: str, end: str) -> 
     if not clean_symbols:
         return pd.DataFrame(columns=["timestamp", "symbol", "open", "high", "low", "close", "volume"])
 
-    cache_path = _ohlcv_cache_path(clean_symbols, start, end)
+    adjustment_value = str(adjustment or DEFAULT_BAR_ADJUSTMENT).strip().lower()
+    cache_path = _ohlcv_cache_path(clean_symbols, start, end, adjustment_value)
     if os.path.exists(cache_path):
         cached = pd.read_csv(cache_path)
         cached["timestamp"] = pd.to_datetime(cached["timestamp"], utc=True)
@@ -122,6 +237,7 @@ def fetch_daily_ohlcv(data_client, symbols: List[str], start: str, end: str) -> 
             "timeframe": TimeFrame.Day,
             "start": pd.Timestamp(start, tz="UTC"),
             "end": pd.Timestamp(end, tz="UTC"),
+            "adjustment": Adjustment(adjustment_value),
         }
         request = StockBarsRequest(**request_kwargs)
         bars = data_client.get_stock_bars(request).df
@@ -207,12 +323,13 @@ def submit_bracket_orders(
     equity: float,
     risk_cfg: RiskConfig,
     dry_run: bool = True,
-) -> None:
+) -> List[Dict[str, Any]]:
     import numpy as np
 
     from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce
     from alpaca.trading.requests import MarketOrderRequest, StopLossRequest, TakeProfitRequest
 
+    actions: List[Dict[str, Any]] = []
     for symbol, weight in weights.items():
         price = float(latest_prices.get(symbol, np.nan))
         if not np.isfinite(price) or price <= 0:
@@ -235,6 +352,17 @@ def submit_bracket_orders(
             take_profit=TakeProfitRequest(limit_price=take_profit),
         )
 
+        action = {
+            "symbol": symbol,
+            "side": "BUY",
+            "qty": qty,
+            "reference_price": price,
+            "stop_loss": stop_price,
+            "take_profit": take_profit,
+            "weight": float(weight),
+            "mode": "paper_dry_run" if dry_run else "paper_submitted",
+        }
+
         if dry_run:
             print(
                 f"[DRY_RUN] submit {symbol} qty={qty} "
@@ -243,6 +371,10 @@ def submit_bracket_orders(
         else:
             response = trading_client.submit_order(order_data=order)
             print(f"SUBMITTED {symbol}: {getattr(response, 'id', '-')}")
+            action["order_id"] = getattr(response, "id", "")
+        actions.append(action)
+
+    return actions
 
 
 def combine_stock_weights(
@@ -267,10 +399,18 @@ def cmd_train(args: argparse.Namespace) -> None:
     from backtest.train import TrainSpec, train
     from backtest.engine import BacktestConfig
 
+    runtime = load_runtime_config()
     data_client, _ = get_alpaca_clients()
     symbols = load_symbols()
-    ohlcv = fetch_daily_ohlcv(data_client, symbols, args.start, args.end)
-    runtime = load_runtime_config()
+    reference_symbols = collect_reference_symbols(args.strategies, use_frozen_params=False)
+    full_ohlcv = fetch_daily_ohlcv(
+        data_client,
+        sorted(set(symbols + reference_symbols)),
+        args.start,
+        args.end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    ohlcv = prepare_trade_ohlcv(full_ohlcv, symbols, reference_symbols)
     backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
 
     spec = TrainSpec(
@@ -283,16 +423,25 @@ def cmd_train(args: argparse.Namespace) -> None:
     )
     result = train(ohlcv, spec, strategies=args.strategies)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    _notify_research("train", result)
 
 
 def cmd_test(args: argparse.Namespace) -> None:
     from backtest.engine import BacktestConfig
     from backtest.test import TestSpec, run_oos_test
 
+    runtime = load_runtime_config()
     data_client, _ = get_alpaca_clients()
     symbols = load_symbols()
-    ohlcv = fetch_daily_ohlcv(data_client, symbols, args.start, args.end)
-    runtime = load_runtime_config()
+    reference_symbols = collect_reference_symbols(args.strategies, use_frozen_params=True)
+    full_ohlcv = fetch_daily_ohlcv(
+        data_client,
+        sorted(set(symbols + reference_symbols)),
+        args.start,
+        args.end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    ohlcv = prepare_trade_ohlcv(full_ohlcv, symbols, reference_symbols)
     backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
 
     spec = TestSpec(
@@ -304,16 +453,25 @@ def cmd_test(args: argparse.Namespace) -> None:
     )
     result = run_oos_test(ohlcv, spec)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    _notify_research("test", result)
 
 
 def cmd_walk_forward(args: argparse.Namespace) -> None:
     from backtest.engine import BacktestConfig
     from backtest.walk_forward import WalkForwardSpec, run_walk_forward
 
+    runtime = load_runtime_config()
     data_client, _ = get_alpaca_clients()
     symbols = load_symbols()
-    ohlcv = fetch_daily_ohlcv(data_client, symbols, args.start, args.end)
-    runtime = load_runtime_config()
+    reference_symbols = collect_reference_symbols(args.strategies, use_frozen_params=True)
+    full_ohlcv = fetch_daily_ohlcv(
+        data_client,
+        sorted(set(symbols + reference_symbols)),
+        args.start,
+        args.end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    ohlcv = prepare_trade_ohlcv(full_ohlcv, symbols, reference_symbols)
     backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
 
     spec = WalkForwardSpec(
@@ -329,16 +487,25 @@ def cmd_walk_forward(args: argparse.Namespace) -> None:
     )
     result = run_walk_forward(ohlcv, spec)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    _notify_research("walk-forward", result)
 
 
 def cmd_optimize(args: argparse.Namespace) -> None:
     from backtest.engine import BacktestConfig
     from backtest.optimizer import OptimizationSpec, optimize_strategies
 
+    runtime = load_runtime_config()
     data_client, _ = get_alpaca_clients()
     symbols = load_symbols()
-    ohlcv = fetch_daily_ohlcv(data_client, symbols, args.start, args.end)
-    runtime = load_runtime_config()
+    reference_symbols = collect_reference_symbols(args.strategies, use_frozen_params=False)
+    full_ohlcv = fetch_daily_ohlcv(
+        data_client,
+        sorted(set(symbols + reference_symbols)),
+        args.start,
+        args.end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    ohlcv = prepare_trade_ohlcv(full_ohlcv, symbols, reference_symbols)
 
     backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
     opt_cfg = runtime.get("optimizer", {}) or {}
@@ -353,16 +520,23 @@ def cmd_optimize(args: argparse.Namespace) -> None:
     )
     result = optimize_strategies(ohlcv, args.strategies, spec)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    _notify_research("optimize", result)
 
 
 def cmd_alpha_research(args: argparse.Namespace) -> None:
     from alpha_lab.research import AlphaResearchConfig, run_alpha_research
     from backtest.engine import BacktestConfig
 
+    runtime = load_runtime_config()
     data_client, _ = get_alpaca_clients()
     symbols = load_symbols()
-    ohlcv = fetch_daily_ohlcv(data_client, symbols, args.start, args.end)
-    runtime = load_runtime_config()
+    ohlcv = fetch_daily_ohlcv(
+        data_client,
+        symbols,
+        args.start,
+        args.end,
+        adjustment=get_research_adjustment(runtime),
+    )
 
     alpha_cfg = runtime.get("alpha_lab", {}) or {}
     backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
@@ -376,6 +550,7 @@ def cmd_alpha_research(args: argparse.Namespace) -> None:
     )
     result = run_alpha_research(ohlcv, research_cfg)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    _notify_research("alpha-research", result)
 
 
 def cmd_pipeline(args: argparse.Namespace) -> None:
@@ -383,9 +558,9 @@ def cmd_pipeline(args: argparse.Namespace) -> None:
     from backtest.engine import BacktestConfig
     from backtest.pipeline import PipelineSpec, run_pipeline
 
+    runtime = load_runtime_config()
     data_client, _ = get_alpaca_clients()
     symbols = load_symbols()
-    runtime = load_runtime_config()
 
     backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
     optimizer_cfg = runtime.get("optimizer", {}) or {}
@@ -401,7 +576,15 @@ def cmd_pipeline(args: argparse.Namespace) -> None:
 
     fetch_start = min(args.optimize_start, args.test_start, args.walk_forward_start)
     fetch_end = max(args.optimize_end, args.test_end, args.walk_forward_end)
-    ohlcv = fetch_daily_ohlcv(data_client, symbols, fetch_start, fetch_end)
+    reference_symbols = collect_reference_symbols(args.candidate_strategies, use_frozen_params=False)
+    full_ohlcv = fetch_daily_ohlcv(
+        data_client,
+        sorted(set(symbols + reference_symbols)),
+        fetch_start,
+        fetch_end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    ohlcv = prepare_trade_ohlcv(full_ohlcv, symbols, reference_symbols)
 
     spec = PipelineSpec(
         symbols=symbols,
@@ -422,6 +605,7 @@ def cmd_pipeline(args: argparse.Namespace) -> None:
     )
     result = run_pipeline(ohlcv, spec, backtest_cfg, optimizer_cfg, research_cfg)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    _notify_research("pipeline", result)
 
 
 def cmd_deploy(args: argparse.Namespace) -> None:
@@ -444,29 +628,48 @@ def cmd_deploy(args: argparse.Namespace) -> None:
 
     end = pd.Timestamp.utcnow().strftime("%Y-%m-%d")
     start = (pd.Timestamp.utcnow() - pd.Timedelta(days=800)).strftime("%Y-%m-%d")
-    fetch_symbols = sorted(set(symbols + [regime_cfg.symbol_for_regime]))
-    ohlcv = fetch_daily_ohlcv(data_client, fetch_symbols, start, end)
-    ohlcv = drop_unconfirmed_daily_bar_for_free_plan(ohlcv)
-    if ohlcv.empty:
+    registry = get_strategy_registry()
+    available_strategies = [name for name in registry if os.path.exists(os.path.join("artifacts", "frozen_params", f"{name}.json"))]
+    reference_symbols = collect_reference_symbols(available_strategies, use_frozen_params=True)
+    fetch_symbols = sorted(set(symbols + reference_symbols + [regime_cfg.symbol_for_regime]))
+    full_ohlcv = fetch_daily_ohlcv(
+        data_client,
+        fetch_symbols,
+        start,
+        end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    full_ohlcv = drop_unconfirmed_daily_bar_for_free_plan(full_ohlcv)
+    if full_ohlcv.empty:
         raise RuntimeError("未获取到任何行情数据。")
 
-    regime = detect_regime(ohlcv, regime_cfg)
-    regime_mix = estimate_regime_mixture(ohlcv, regime_cfg)
+    regime = detect_regime(full_ohlcv, regime_cfg)
+    regime_mix = estimate_regime_mixture(full_ohlcv, regime_cfg)
     print(f"Regime = {regime}")
     print("Regime mix:", regime_mix)
 
+    deploy_summary: Dict[str, Any] = {
+        "regime": str(regime),
+        "regime_mix": regime_mix,
+        "strategy_allocations": {},
+        "target_weights": {},
+        "paper_actions": [],
+        "manual_actions": [],
+        "dry_run": bool(args.dry_run),
+    }
+
     if regime == RegimeLabel.RANGE_HIGH_VOL and regime_cfg.no_trade_in_range_high_vol:
         print("Regime=RANGE_HIGH_VOL，按配置不交易。")
+        _notify_deploy(deploy_summary)
         return
 
-    trade_data = ohlcv[ohlcv["symbol"].isin(symbols)].copy()
+    trade_data = prepare_trade_ohlcv(full_ohlcv, symbols, reference_symbols)
     asof_ts = pd.to_datetime(trade_data["timestamp"].max(), utc=True)
-    registry = get_strategy_registry()
-
-    available_strategies = [name for name in registry if os.path.exists(os.path.join("artifacts", "frozen_params", f"{name}.json"))]
     strategy_allocations = compute_strategy_allocations(regime_mix, available_strategies, blend_cfg)
+    deploy_summary["strategy_allocations"] = strategy_allocations
     if not strategy_allocations:
         print("当前没有可用的策略层资金分配。")
+        _notify_deploy(deploy_summary)
         return
 
     strategy_stock_weights: Dict[str, Dict[str, float]] = {}
@@ -486,22 +689,39 @@ def cmd_deploy(args: argparse.Namespace) -> None:
     weights = clamp_weights(weights, risk_cfg)
     print("Strategy allocations:", strategy_allocations)
     print("Target weights:", weights)
+    deploy_summary["target_weights"] = weights
 
     if not weights:
         print("当前无可执行目标仓位。")
+        _notify_deploy(deploy_summary)
         return
 
+    execution_fetch_start = (pd.Timestamp.utcnow() - pd.Timedelta(days=30)).strftime("%Y-%m-%d")
+    raw_trade_ohlcv = fetch_daily_ohlcv(
+        data_client,
+        symbols,
+        execution_fetch_start,
+        end,
+        adjustment=get_execution_adjustment(runtime),
+    )
+    raw_trade_ohlcv = drop_unconfirmed_daily_bar_for_free_plan(raw_trade_ohlcv)
+    if raw_trade_ohlcv.empty:
+        raise RuntimeError("未获取到用于执行定价的 raw 数据。")
+
+    raw_asof_ts = pd.to_datetime(raw_trade_ohlcv["timestamp"].max(), utc=True)
     latest_prices = (
-        trade_data[trade_data["timestamp"] == asof_ts][["symbol", "close"]]
+        raw_trade_ohlcv[raw_trade_ohlcv["timestamp"] == raw_asof_ts][["symbol", "close"]]
         .set_index("symbol")["close"]
         .to_dict()
     )
+    deploy_summary["execution_reference_date"] = str(raw_asof_ts)
+    deploy_summary["execution_price_adjustment"] = get_execution_adjustment(runtime)
 
     account = trading_client.get_account()
     equity = float(account.equity)
     print(f"Account equity = {equity:.2f}")
 
-    submit_bracket_orders(
+    actions = submit_bracket_orders(
         trading_client,
         weights,
         latest_prices,
@@ -509,6 +729,9 @@ def cmd_deploy(args: argparse.Namespace) -> None:
         risk_cfg,
         dry_run=args.dry_run,
     )
+    deploy_summary["paper_actions"] = actions
+    deploy_summary["manual_actions"] = actions
+    _notify_deploy(deploy_summary)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -588,7 +811,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    args.fn(args)
+    try:
+        args.fn(args)
+    except Exception as exc:
+        command_name = getattr(args, "cmd", "unknown")
+        _notify_failure(command_name, exc)
+        raise
 
 
 if __name__ == "__main__":

@@ -7,8 +7,10 @@
 - 多策略研究、参数优化、冻结参数
 - OOS 测试与 Walk-forward 验证
 - 一键 `pipeline` 研究流程
+- 趋势策略里的 `VIX` 代理过滤
 - 基于市场状态占比的策略混合持仓
 - Alpha 因子研究：IC / Rank IC / IC decay / Quantile / 组合因子 / 因子回测
+- 自动邮件通知：研究报告、因子分析、模拟盘动作、IBKR 手动执行建议
 
 先说明一个非常重要的原则：
 
@@ -80,7 +82,7 @@
 ### 趋势策略
 
 - [strategy/trend/trend.py](strategy/trend/trend.py)
-  - 突破 + 量能 + 动量
+  - 突破 + 量能 + 动量 + `VIX` 代理过滤
 - [strategy/turtle/turtle.py](strategy/turtle/turtle.py)
   - Donchian / 海龟风格突破
 - [strategy/pullback/pullback.py](strategy/pullback/pullback.py)
@@ -158,7 +160,10 @@
 
 - [config/runtime.yaml](config/runtime.yaml)
 
-当前主要分成 7 组：
+当前主要分成 8 组：
+
+- `data`
+  - 历史 bars 的研究/执行价格口径
 
 - `regime`
   - 市场状态识别参数
@@ -221,6 +226,8 @@
 - 这仍然是日频近似，不是逐笔撮合
 - 止损/止盈是用日线 high/low/close 做近似
 - 对于免费版 Alpaca，部署阶段已经额外处理了 15 分钟延迟导致的“当日日线未确认”问题
+- 研究和回测默认使用 `adjustment="all"`
+- 真正给第二天委托价格、止损价、止盈价定价时，`deploy` 会额外拉一份 `raw` 数据，避免和真实市场价格错位
 
 ---
 
@@ -355,6 +362,9 @@ python main.py deploy --dry-run
 - 最近一段时间的 regime mix
 - 各策略资金分配
 - 最终合成的股票目标权重
+- 以及一封自动邮件：
+  - 一封写 Alpaca 模拟盘里做了什么
+  - 一封写你在 IBKR App 里可以手动照着做什么
 
 ---
 
@@ -431,7 +441,9 @@ ALPACA_API_KEY=你的_paper_key
 ALPACA_API_SECRET=你的_paper_secret
 ```
 
-如果要发邮件，再补：
+### 自动邮件通知
+
+如果你把下面这些变量配好：
 
 ```env
 EMAIL_SENDER=你的发件邮箱
@@ -440,6 +452,32 @@ EMAIL_RECEIVER=你的收件邮箱
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 ```
+
+补充说明：
+
+- 如果你用的是 `QQ 邮箱 + 465`，现在代码会自动按 `SSL` 方式发送
+- 如果你以后想手动指定，也可以加：
+  - `SMTP_USE_SSL=true`
+  - `SMTP_USE_STARTTLS=false`
+
+那么项目会在这些命令完成后自动发邮件：
+
+- `optimize`
+- `train`
+- `test`
+- `walk-forward`
+- `alpha-research`
+- `pipeline`
+- `deploy`
+
+默认发件人显示名就是：`财政小助手mina`。  
+不同主体会用不同标题，例如：
+
+- 回测研究报告
+- 因子分析报告
+- Alpaca 模拟盘操作
+- IBKR 手动操作建议
+- 任务失败告警
 
 ---
 

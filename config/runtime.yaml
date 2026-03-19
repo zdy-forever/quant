@@ -1,3 +1,7 @@
+data:
+  research_bar_adjustment: "all"
+  execution_bar_adjustment: "raw"
+
 regime:
   symbol_for_regime: "SPY"
   trend_fast: 20
