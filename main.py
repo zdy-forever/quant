@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 from typing import TYPE_CHECKING, Dict, List
+from zoneinfo import ZoneInfo
 import pandas as pd
 
 if TYPE_CHECKING:
@@ -26,6 +27,8 @@ if TYPE_CHECKING:
     from risk.management import RiskConfig
 
 DEFAULT_SYMBOLS = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "GOOGL"]
+NY_TZ = ZoneInfo("America/New_York")
+FREE_PLAN_DELAY_MINUTES = 15
 
 
 def load_runtime_config(path: str = "config/runtime.yaml") -> dict:
@@ -95,6 +98,51 @@ def fetch_daily_ohlcv(data_client, symbols: List[str], start: str, end: str) -> 
     return df[["timestamp", "symbol", "open", "high", "low", "close", "volume"]].sort_values(
         ["timestamp", "symbol"]
     )
+
+
+def drop_unconfirmed_daily_bar_for_free_plan(
+    ohlcv: pd.DataFrame,
+    now_utc: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """
+    Alpaca 免费数据常见场景是美股数据存在约 15 分钟延迟。
+
+    对日线策略来说，最危险的地方不是“旧 15 分钟”，而是：
+    在美东当日收盘前，或者刚收盘但延迟窗口还没结束时，
+    代码把“今天这根尚未完全确认的日线”拿来生成信号。
+
+    这里的处理原则很保守：
+    - 如果最新 bar 的日期就是当前美东日期
+    - 且现在还没到 16:15 ET
+    - 就直接丢弃这一天的数据，只用上一个完整交易日
+    """
+
+    if ohlcv.empty:
+        return ohlcv
+
+    if now_utc is None:
+        now_utc = pd.Timestamp.now(tz="UTC")
+    else:
+        now_utc = pd.to_datetime(now_utc, utc=True)
+
+    now_ny = now_utc.tz_convert(NY_TZ)
+    latest_ts = pd.to_datetime(ohlcv["timestamp"].max(), utc=True)
+    latest_ny = latest_ts.tz_convert(NY_TZ)
+
+    market_close_with_delay = now_ny.normalize() + pd.Timedelta(hours=16, minutes=FREE_PLAN_DELAY_MINUTES)
+    same_market_day = latest_ny.date() == now_ny.date()
+    bar_not_confirmed = now_ny < market_close_with_delay
+
+    if same_market_day and bar_not_confirmed:
+        safe_ohlcv = ohlcv[ohlcv["timestamp"] < latest_ts].copy()
+        if not safe_ohlcv.empty:
+            print(
+                "[INFO] Alpaca free data may be delayed by 15 minutes. "
+                "Dropped today's unconfirmed daily bar and used the previous completed session."
+            )
+            return safe_ohlcv
+
+    return ohlcv
 
 
 def load_frozen_params(strategy_name: str) -> Dict[str, float]:
@@ -231,6 +279,7 @@ def cmd_deploy(args: argparse.Namespace) -> None:
     start = (pd.Timestamp.utcnow() - pd.Timedelta(days=800)).strftime("%Y-%m-%d")
     fetch_symbols = sorted(set(symbols + [regime_cfg.symbol_for_regime]))
     ohlcv = fetch_daily_ohlcv(data_client, fetch_symbols, start, end)
+    ohlcv = drop_unconfirmed_daily_bar_for_free_plan(ohlcv)
     if ohlcv.empty:
         raise RuntimeError("未获取到任何行情数据。")
 
