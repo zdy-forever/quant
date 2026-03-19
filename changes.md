@@ -11,12 +11,16 @@
 ### 重点新增说明
 
 - 新架构主入口是 [main.py](main.py)
-- 旧版扫描交易入口仍然是 [main/main_scan.py](main/main_scan.py) 和 [main/main_trade.py](main/main_trade.py)
 - 推荐优先修改 [config/runtime.yaml](config/runtime.yaml) 和 [config/symbols.txt](config/symbols.txt)，不要一开始就频繁改策略核心逻辑
 
 ### 文档修正
 
 - 按你的要求，把 Markdown 文档中的绝对路径链接统一改成了相对路径
+
+### 架构清理
+
+- 删除了旧架构目录 `main/` 和 `utils/`
+- 删除了 README 中所有关于旧架构和旧脚本的说明
 
 ### 备注
 
