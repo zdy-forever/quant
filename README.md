@@ -35,15 +35,15 @@
 
 你不需要一次把所有代码都看懂。更推荐先按下面顺序读：
 
-1. [main.py](/C:/Users/15350/Desktop/coding/quant/main.py)
-2. [strategy/base_strategy.py](/C:/Users/15350/Desktop/coding/quant/strategy/base_strategy.py)
-3. [strategy/trend/trend.py](/C:/Users/15350/Desktop/coding/quant/strategy/trend/trend.py)
-4. [strategy/mean_reversion/mean_reversion.py](/C:/Users/15350/Desktop/coding/quant/strategy/mean_reversion/mean_reversion.py)
-5. [portfolio/position_sizing.py](/C:/Users/15350/Desktop/coding/quant/portfolio/position_sizing.py)
-6. [risk/management.py](/C:/Users/15350/Desktop/coding/quant/risk/management.py)
-7. [backtest/train.py](/C:/Users/15350/Desktop/coding/quant/backtest/train.py)
-8. [backtest/test.py](/C:/Users/15350/Desktop/coding/quant/backtest/test.py)
-9. [backtest/walk_forward.py](/C:/Users/15350/Desktop/coding/quant/backtest/walk_forward.py)
+1. [main.py](main.py)
+2. [strategy/base_strategy.py](strategy/base_strategy.py)
+3. [strategy/trend/trend.py](strategy/trend/trend.py)
+4. [strategy/mean_reversion/mean_reversion.py](strategy/mean_reversion/mean_reversion.py)
+5. [portfolio/position_sizing.py](portfolio/position_sizing.py)
+6. [risk/management.py](risk/management.py)
+7. [backtest/train.py](backtest/train.py)
+8. [backtest/test.py](backtest/test.py)
+9. [backtest/walk_forward.py](backtest/walk_forward.py)
 
 ---
 
@@ -51,30 +51,30 @@
 
 ### 新架构
 
-- [main.py](/C:/Users/15350/Desktop/coding/quant/main.py)
+- [main.py](main.py)
   - 新的统一命令入口
-- [strategy/](/C:/Users/15350/Desktop/coding/quant/strategy)
+- [strategy/](strategy/)
   - 放策略逻辑
-- [regime/](/C:/Users/15350/Desktop/coding/quant/regime)
+- [regime/](regime/)
   - 放市场状态识别逻辑
-- [portfolio/](/C:/Users/15350/Desktop/coding/quant/portfolio)
+- [portfolio/](portfolio/)
   - 放仓位分配逻辑
-- [risk/](/C:/Users/15350/Desktop/coding/quant/risk)
+- [risk/](risk/)
   - 放风控逻辑
-- [backtest/](/C:/Users/15350/Desktop/coding/quant/backtest)
+- [backtest/](backtest/)
   - 放训练、测试和 walk-forward 流程
-- [config/](/C:/Users/15350/Desktop/coding/quant/config)
+- [config/](config/)
   - 放运行期配置
-- [artifacts/](/C:/Users/15350/Desktop/coding/quant/artifacts)
+- [artifacts/](artifacts/)
   - 放冻结参数和报告
-- [tests/](/C:/Users/15350/Desktop/coding/quant/tests)
+- [tests/](tests/)
   - 放测试
 
 ### 旧架构
 
-- [main/](/C:/Users/15350/Desktop/coding/quant/main)
+- [main/](main/)
   - 旧版扫描和交易脚本
-- [utils/](/C:/Users/15350/Desktop/coding/quant/utils)
+- [utils/](utils/)
   - 旧版工具函数
 
 保留旧架构是为了方便你对照和渐进迁移，不是让你同时维护两套完全独立系统。
@@ -85,45 +85,45 @@
 
 ### 统一入口
 
-- [main.py](/C:/Users/15350/Desktop/coding/quant/main.py)
+- [main.py](main.py)
   - 负责接收命令行参数，并分发到 `train`、`test`、`walk-forward`、`deploy`
 
 ### 策略
 
-- [strategy/base_strategy.py](/C:/Users/15350/Desktop/coding/quant/strategy/base_strategy.py)
+- [strategy/base_strategy.py](strategy/base_strategy.py)
   - 规定所有策略必须实现什么接口
-- [strategy/trend/trend.py](/C:/Users/15350/Desktop/coding/quant/strategy/trend/trend.py)
+- [strategy/trend/trend.py](strategy/trend/trend.py)
   - 趋势突破策略
-- [strategy/mean_reversion/mean_reversion.py](/C:/Users/15350/Desktop/coding/quant/strategy/mean_reversion/mean_reversion.py)
+- [strategy/mean_reversion/mean_reversion.py](strategy/mean_reversion/mean_reversion.py)
   - 均值回归策略
 
 ### 状态识别、仓位、风控
 
-- [regime/detection.py](/C:/Users/15350/Desktop/coding/quant/regime/detection.py)
+- [regime/detection.py](regime/detection.py)
   - 判断当前更像趋势市还是震荡市
-- [portfolio/position_sizing.py](/C:/Users/15350/Desktop/coding/quant/portfolio/position_sizing.py)
+- [portfolio/position_sizing.py](portfolio/position_sizing.py)
   - 根据信号计算资金权重
-- [risk/management.py](/C:/Users/15350/Desktop/coding/quant/risk/management.py)
+- [risk/management.py](risk/management.py)
   - 限制单标的权重、总敞口和回撤
 
 ### 回测与验证
 
-- [backtest/train.py](/C:/Users/15350/Desktop/coding/quant/backtest/train.py)
+- [backtest/train.py](backtest/train.py)
   - 用训练集搜索参数并冻结
-- [backtest/test.py](/C:/Users/15350/Desktop/coding/quant/backtest/test.py)
+- [backtest/test.py](backtest/test.py)
   - 用样本外区间做 OOS 测试
-- [backtest/walk_forward.py](/C:/Users/15350/Desktop/coding/quant/backtest/walk_forward.py)
+- [backtest/walk_forward.py](backtest/walk_forward.py)
   - 用多个连续窗口做稳定性检查
 
 ### 配置与产物
 
-- [config/runtime.yaml](/C:/Users/15350/Desktop/coding/quant/config/runtime.yaml)
+- [config/runtime.yaml](config/runtime.yaml)
   - 运行期可以调的参数
-- [config/symbols.txt](/C:/Users/15350/Desktop/coding/quant/config/symbols.txt)
+- [config/symbols.txt](config/symbols.txt)
   - 股票池
-- [artifacts/frozen_params/](/C:/Users/15350/Desktop/coding/quant/artifacts/frozen_params)
+- [artifacts/frozen_params/](artifacts/frozen_params/)
   - 冻结后的参数
-- [artifacts/reports/](/C:/Users/15350/Desktop/coding/quant/artifacts/reports)
+- [artifacts/reports/](artifacts/reports/)
   - 各类报告输出
 
 ---
@@ -193,7 +193,7 @@ SMTP_PORT=587
 
 文件：
 
-- [config/symbols.txt](/C:/Users/15350/Desktop/coding/quant/config/symbols.txt)
+- [config/symbols.txt](config/symbols.txt)
 
 规则：
 
@@ -215,7 +215,7 @@ AMZN
 
 文件：
 
-- [config/runtime.yaml](/C:/Users/15350/Desktop/coding/quant/config/runtime.yaml)
+- [config/runtime.yaml](config/runtime.yaml)
 
 这里允许你调整 3 类内容：
 
@@ -259,8 +259,8 @@ python main.py train --start 2016-01-01 --end 2021-12-31 --strategies trend mean
 
 输出：
 
-- [artifacts/frozen_params/](/C:/Users/15350/Desktop/coding/quant/artifacts/frozen_params)
-- [artifacts/reports/](/C:/Users/15350/Desktop/coding/quant/artifacts/reports)
+- [artifacts/frozen_params/](artifacts/frozen_params/)
+- [artifacts/reports/](artifacts/reports/)
 
 ### 第二步：样本外测试
 
@@ -322,13 +322,13 @@ python main.py deploy
 
 改：
 
-- [config/symbols.txt](/C:/Users/15350/Desktop/coding/quant/config/symbols.txt)
+- [config/symbols.txt](config/symbols.txt)
 
 ### 场景 2：我想让系统少买一点股票
 
 改：
 
-- [config/runtime.yaml](/C:/Users/15350/Desktop/coding/quant/config/runtime.yaml)
+- [config/runtime.yaml](config/runtime.yaml)
 
 重点字段：
 
@@ -340,7 +340,7 @@ python main.py deploy
 
 改：
 
-- [strategy/trend/trend.py](/C:/Users/15350/Desktop/coding/quant/strategy/trend/trend.py)
+- [strategy/trend/trend.py](strategy/trend/trend.py)
 
 重点字段：
 
@@ -351,7 +351,7 @@ python main.py deploy
 
 改：
 
-- [strategy/mean_reversion/mean_reversion.py](/C:/Users/15350/Desktop/coding/quant/strategy/mean_reversion/mean_reversion.py)
+- [strategy/mean_reversion/mean_reversion.py](strategy/mean_reversion/mean_reversion.py)
 
 重点字段：
 
@@ -362,8 +362,8 @@ python main.py deploy
 
 改：
 
-- [risk/management.py](/C:/Users/15350/Desktop/coding/quant/risk/management.py)
-- [config/runtime.yaml](/C:/Users/15350/Desktop/coding/quant/config/runtime.yaml)
+- [risk/management.py](risk/management.py)
+- [config/runtime.yaml](config/runtime.yaml)
 
 ---
 
@@ -371,9 +371,9 @@ python main.py deploy
 
 如果你暂时还想用最早那套扫描/下单流程，也可以继续：
 
-- [main/main_scan.py](/C:/Users/15350/Desktop/coding/quant/main/main_scan.py)
+- [main/main_scan.py](main/main_scan.py)
   - 生成扫描结果和候选 CSV
-- [main/main_trade.py](/C:/Users/15350/Desktop/coding/quant/main/main_trade.py)
+- [main/main_trade.py](main/main_trade.py)
   - 读取候选 CSV 并下模拟单
 
 这套旧流程的优点是简单直观，适合入门理解。  
@@ -385,11 +385,11 @@ python main.py deploy
 
 测试目录：
 
-- [tests/test_splits.py](/C:/Users/15350/Desktop/coding/quant/tests/test_splits.py)
+- [tests/test_splits.py](tests/test_splits.py)
   - 保证时间窗口逻辑没有穿越
-- [tests/test_freeze_manifest.py](/C:/Users/15350/Desktop/coding/quant/tests/test_freeze_manifest.py)
+- [tests/test_freeze_manifest.py](tests/test_freeze_manifest.py)
   - 保证冻结参数文件和清单能正常生成
-- [tests/test_no_lookahead.py](/C:/Users/15350/Desktop/coding/quant/tests/test_no_lookahead.py)
+- [tests/test_no_lookahead.py](tests/test_no_lookahead.py)
   - 保证趋势策略没有前视偏差
 
 运行方式：
