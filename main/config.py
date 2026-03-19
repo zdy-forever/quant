@@ -1,3 +1,16 @@
+"""
+旧版脚本使用的集中配置文件。
+
+这里主要保存：
+- Alpaca 凭证读取
+- 扫描参数
+- 风控参数
+- 邮件配置
+
+如果你是新手，建议把它理解成“旧系统的控制面板”。
+不过新架构里更推荐把运行期参数放到 `config/runtime.yaml`。
+"""
+
 import os
 from pathlib import Path
 

@@ -1,3 +1,17 @@
+"""
+旧版扫描主程序。
+
+它会按顺序完成：
+1. 读取股票池
+2. 拉取历史日线
+3. 计算因子
+4. 生成买入候选
+5. 保存 CSV
+6. 发送扫描邮件
+
+如果你想先从一个简单脚本理解整个交易系统，这个文件很适合作为入口。
+"""
+
 import os
 
 from main.config import LOOKBACK_BARS, OUTPUT_DIR, SIGNALS_CSV, SELECTED_CSV

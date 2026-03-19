@@ -1,3 +1,10 @@
+"""
+冻结参数文件相关的测试。
+
+它验证训练阶段写出的 frozen 参数和 MANIFEST 是否完整，
+避免后面出现“参数写出来了，但系统不知道它是谁、什么时候生成的”这种问题。
+"""
+
 import json
 
 import backtest.train as train_mod

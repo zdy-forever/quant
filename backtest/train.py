@@ -1,4 +1,16 @@
 # -*- coding: utf-8 -*-
+"""
+训练与冻结参数模块。
+
+这个文件只服务于“研究阶段”：
+- 遍历参数网格
+- 用训练区间做简单回测
+- 选出表现最好的参数
+- 把参数写入 `artifacts/frozen_params/`
+
+对量化新手来说，最重要的原则是：
+训练可以调参数，但训练结束后要冻结，不能把测试集看完再回头改。
+"""
 from __future__ import annotations
 
 import hashlib

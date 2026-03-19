@@ -1,3 +1,11 @@
+"""
+旧版行情加载模块。
+
+这个文件负责从 Alpaca 拉取一批股票的日线数据，
+供旧版扫描流程使用。
+如果后面你想切换数据源或改拉取粒度，可以先从这里下手。
+"""
+
 import pandas as pd
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame

@@ -1,4 +1,13 @@
 # -*- coding: utf-8 -*-
+"""
+Walk-forward 验证模块。
+
+单次 OOS 测试看的是“某一段时间”；
+Walk-forward 看的是“很多连续时间窗口”里是否都还能站得住。
+
+如果你发现单次测试很好，但不同窗口差异很大，通常意味着策略稳定性不足。
+所以这个文件更像是策略上线前的体检工具。
+"""
 from __future__ import annotations
 
 import json

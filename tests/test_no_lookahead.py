@@ -1,3 +1,12 @@
+"""
+防前视偏差测试。
+
+这个测试的目的很重要：确认趋势策略用的是“过去窗口”的高点，
+而不是把当天未来才知道的数据偷偷用进来。
+
+如果这个测试失败，说明策略可能存在 lookahead bias，回测结果就不可信。
+"""
+
 import pandas as pd
 
 from strategy.trend.trend import TrendBreakoutStrategy

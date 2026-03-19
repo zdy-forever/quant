@@ -1,4 +1,14 @@
 # -*- coding: utf-8 -*-
+"""
+所有策略类的公共接口定义都放在这里。
+
+你可以把这个文件看成“策略开发规范”：
+- 新策略必须继承 `BaseStrategy`
+- 必须告诉系统默认参数、参数搜索范围、需要哪些字段
+- 必须实现 `generate()`，把行情数据变成信号
+
+如果你以后想新增第三个策略，最推荐先读这个文件。
+"""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

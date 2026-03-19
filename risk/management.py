@@ -1,4 +1,15 @@
 # -*- coding: utf-8 -*-
+"""
+风险管理模块。
+
+这里放的是交易系统的“安全带”：
+- 单个标的最大权重
+- 总仓位上限
+- 最大回撤熔断
+- 回测里的滑点和佣金假设
+
+如果策略收益不错但回撤太大，通常先从这个文件下手，而不是直接改策略本身。
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass

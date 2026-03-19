@@ -1,3 +1,10 @@
+"""
+旧版下单模块。
+
+这个文件专门负责构造和提交 Alpaca 的 bracket order。
+也就是说，它不负责决定买什么，只负责把“交易意图”变成券商 API 请求。
+"""
+
 from alpaca.trading.requests import (
     MarketOrderRequest,
     StopLossRequest,

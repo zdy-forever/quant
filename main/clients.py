@@ -1,3 +1,11 @@
+"""
+Alpaca 客户端初始化文件。
+
+这个文件只做一件事：创建数据客户端和交易客户端。
+你后面如果更换券商、切换 live/paper、或者想做统一连接管理，
+通常会从这里开始改。
+"""
+
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.trading.client import TradingClient
 

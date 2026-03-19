@@ -1,4 +1,17 @@
 # -*- coding: utf-8 -*-
+"""
+均值回归策略模块。
+
+这个策略更适合“价格短期偏离后回归均值”的环境，核心思路是：
+- 用滚动均值和标准差估计当前价格是否超卖
+- 如果 z-score 很低，就把它视为潜在反弹候选
+- 每天只保留分数最高的少量标的
+
+如果你以后想让策略更激进或更保守，最常改的是：
+- `lookback`
+- `entry_z`
+- `top_k`
+"""
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable

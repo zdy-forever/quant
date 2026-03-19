@@ -1,3 +1,11 @@
+"""
+邮件报告模块。
+
+它负责把扫描结果和交易结果整理成 HTML 邮件并发送出去。
+如果你之后想把结果改成更好看的格式，或者改成企业邮箱 / Telegram / 钉钉通知，
+这个文件就是主要入口。
+"""
+
 import os
 import smtplib
 from datetime import datetime

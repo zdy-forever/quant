@@ -1,3 +1,13 @@
+"""
+旧版风险与候选筛选模块。
+
+这里主要包含两类逻辑：
+- 固定风险法计算仓位股数
+- 从所有候选里选出前几个最优标的
+
+如果你想先做最简单的仓位控制，这个文件很好上手。
+"""
+
 from main.config import RISK_PER_TRADE, STOP_LOSS_PCT, MAX_POSITIONS
 
 

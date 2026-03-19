@@ -1,4 +1,16 @@
 # -*- coding: utf-8 -*-
+"""
+仓位分配模块。
+
+同样的买入信号，可以配很多不同的资金分配方式：
+- 等权
+- 波动率目标
+- 风险平价
+- Kelly
+
+这个文件解决的问题不是“买什么”，而是“每个标的买多少”。
+如果以后你觉得策略方向没问题，但仓位太激进/太保守，优先来这里调。
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass

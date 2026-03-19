@@ -1,4 +1,18 @@
 # -*- coding: utf-8 -*-
+"""
+项目新的统一入口文件。
+
+如果你是量化新手，可以把它理解成“总控制台”：
+1. `train` 用训练区间做研究并冻结参数
+2. `test` 用样本外区间验证冻结后的策略
+3. `walk-forward` 看多个时间窗口上的稳定性
+4. `deploy` 把冻结后的策略接到 Alpaca Paper 模拟盘
+
+日后你最常微调的通常不是这里的主流程，而是：
+- `config/runtime.yaml` 里的运行期参数
+- `strategy/` 里的策略逻辑
+- `portfolio/` 和 `risk/` 里的仓位与风控规则
+"""
 from __future__ import annotations
 
 import argparse

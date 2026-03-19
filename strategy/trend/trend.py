@@ -1,4 +1,19 @@
 # -*- coding: utf-8 -*-
+"""
+趋势突破策略模块。
+
+这个策略更适合“上涨有延续性”的市场环境，核心思路是：
+- 价格突破过去一段时间高点
+- 当天成交量明显放大
+- 中期收益率为正，说明趋势不是随机噪声
+
+如果你想微调趋势策略，最先看的通常是：
+- `breakout_window`
+- `volume_window`
+- `momentum_window`
+- `min_volume_ratio`
+- `top_k`
+"""
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable

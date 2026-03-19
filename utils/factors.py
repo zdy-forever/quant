@@ -1,3 +1,16 @@
+"""
+旧版因子计算模块。
+
+它把原始 K 线加工成更容易做决策的字段，比如：
+- 5日/20日收益率
+- 突破高点
+- 平均成交量
+- 平均成交额
+- 量比
+
+如果你以后想加新的过滤条件，通常就在这里扩展。
+"""
+
 import pandas as pd
 
 from main.config import BREAKOUT_WINDOW, VOLUME_WINDOW

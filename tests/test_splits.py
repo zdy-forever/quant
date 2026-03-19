@@ -1,3 +1,11 @@
+"""
+时间窗口相关的基础测试。
+
+这个文件主要防两类常见错误：
+- 月份推进逻辑不单调，导致 walk-forward 窗口穿越
+- 时间戳不是 UTC-aware，后面一旦跨时区会很容易出问题
+"""
+
 import pandas as pd
 
 from backtest.walk_forward import _month_add, _to_utc_ts
