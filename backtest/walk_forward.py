@@ -21,6 +21,7 @@ import pandas as pd
 from backtest.test import _load_frozen_params
 from backtest.train import REPORT_DIR, _metrics, _simple_backtest
 from strategy.mean_reversion.mean_reversion import MeanReversionBollingerStrategy
+from strategy.pullback.pullback import PullbackMomentumStrategy
 from strategy.trend.trend import TrendBreakoutStrategy
 
 
@@ -52,6 +53,7 @@ def run_walk_forward(ohlcv: pd.DataFrame, wf: WalkForwardSpec) -> Dict[str, Any]
     name_to_strategy = {
         "trend": TrendBreakoutStrategy(),
         "mean_reversion": MeanReversionBollingerStrategy(),
+        "pullback": PullbackMomentumStrategy(),
     }
 
     start_ts = _to_utc_ts(wf.start)

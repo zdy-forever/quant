@@ -21,6 +21,7 @@ import pandas as pd
 
 from backtest.train import FROZEN_DIR, REPORT_DIR, _file_sha256, _metrics, _simple_backtest
 from strategy.mean_reversion.mean_reversion import MeanReversionBollingerStrategy
+from strategy.pullback.pullback import PullbackMomentumStrategy
 from strategy.trend.trend import TrendBreakoutStrategy
 
 
@@ -61,6 +62,7 @@ def run_oos_test(ohlcv: pd.DataFrame, test_spec: TestSpec) -> Dict[str, Any]:
     name_to_strategy = {
         "trend": TrendBreakoutStrategy(),
         "mean_reversion": MeanReversionBollingerStrategy(),
+        "pullback": PullbackMomentumStrategy(),
     }
 
     before_hashes = _snapshot_frozen_hashes() if test_spec.forbid_param_write else {}

@@ -71,3 +71,5 @@
 ### 备注
 
 - 按你的要求，后续我每次做代码修改时都会同步更新这个文件
+- 补充接入了 `pullback` 策略框架，并完成了一轮 train/test 评估；当前 OOS 不佳，暂不建议作为主策略
+- 新增仓库 `.gitignore`，忽略 `.DS_Store`、`__pycache__/`、`.venv/` 以及 `artifacts/reports/` 这类本地/临时产物

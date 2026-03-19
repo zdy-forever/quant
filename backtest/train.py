@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 
 from strategy.mean_reversion.mean_reversion import MeanReversionBollingerStrategy
+from strategy.pullback.pullback import PullbackMomentumStrategy
 from strategy.trend.trend import TrendBreakoutStrategy
 
 
@@ -269,6 +270,7 @@ def train(
     name_to_strategy = {
         "trend": TrendBreakoutStrategy(),
         "mean_reversion": MeanReversionBollingerStrategy(),
+        "pullback": PullbackMomentumStrategy(),
     }
 
     selected = []
