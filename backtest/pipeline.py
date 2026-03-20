@@ -44,7 +44,7 @@ class PipelineSpec:
     overwrite_frozen: bool = True
     walk_forward_train_years: int = 3
     walk_forward_test_months: int = 6
-    walk_forward_step_months: int = 3
+    walk_forward_step_months: int = 6
     walk_forward_gap_days: int = 1
 
 
@@ -191,13 +191,14 @@ def _write_markdown_report(summary: Dict[str, Any], path: str) -> None:
             f"max_dd={test_metrics.get('max_dd', float('nan')):.3%}, "
             f"calmar={test_metrics.get('calmar', float('nan')):.3f}"
         )
-        wf_metrics = summary["walk_forward"]["strategies"][name].get("overall_metrics", {})
+        wf_metrics = summary["walk_forward"]["strategies"][name].get("window_summary", {})
         if wf_metrics:
             lines.append(
-                f"- Walk-forward overall: sharpe={wf_metrics.get('sharpe', float('nan')):.3f}, "
-                f"cagr={wf_metrics.get('cagr', float('nan')):.3%}, "
-                f"max_dd={wf_metrics.get('max_dd', float('nan')):.3%}, "
-                f"calmar={wf_metrics.get('calmar', float('nan')):.3f}"
+                f"- Walk-forward stability: +Sharpe窗口占比={wf_metrics.get('positive_sharpe_ratio', float('nan')):.1%}, "
+                f"+Calmar窗口占比={wf_metrics.get('positive_calmar_ratio', float('nan')):.1%}, "
+                f"中位Sharpe={wf_metrics.get('median_sharpe', float('nan')):.3f}, "
+                f"中位CAGR={wf_metrics.get('median_cagr', float('nan')):.3%}, "
+                f"最差窗口MaxDD={wf_metrics.get('worst_window_max_dd', float('nan')):.3%}"
             )
         lines.append("")
 

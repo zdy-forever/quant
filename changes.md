@@ -1,5 +1,200 @@
 # Changes Log
 
+## 2026-03-20 1.0.12（从策略驱动切到因子驱动）
+
+### 因子来源与因子目录
+
+- 新增 [factors/](factors/)
+- 新增：
+  - [factors/base.py](factors/base.py)
+  - [factors/momentum.py](factors/momentum.py)
+  - [factors/reversal.py](factors/reversal.py)
+  - [factors/volatility.py](factors/volatility.py)
+  - [factors/volume.py](factors/volume.py)
+  - [factors/breakout.py](factors/breakout.py)
+  - [factors/composite.py](factors/composite.py)
+- 现在项目不再把“短线想法”直接写成策略，优先先拆成原子因子
+- 当前已经落地的核心因子来源包括：
+  - cross-sectional momentum / relative strength
+  - short-term reversal
+  - volume anomaly / turnover shock
+  - low volatility / volatility compression
+  - gap + continuation / trend + pullback 的工程化拆解
+- 新增因子来源说明：
+  - [report/alpha-factor-sources.md](report/alpha-factor-sources.md)
+
+### 研究层重构
+
+- 新增 [research/](research/)
+- 新增：
+  - [research/standardize.py](research/standardize.py)
+  - [research/factor_engine.py](research/factor_engine.py)
+  - [research/ic_analysis.py](research/ic_analysis.py)
+  - [research/quantile_backtest.py](research/quantile_backtest.py)
+  - [research/factor_tests.py](research/factor_tests.py)
+  - [research/factor_selection.py](research/factor_selection.py)
+- 现在研究流程已经拆成：
+  - universe / eligibility
+  - 横截面标准化
+  - 单因子 IC / Rank IC / quantile spread / hit rate
+  - train / OOS 稳定因子筛选
+- 更新了 [alpha_lab/factors.py](alpha_lab/factors.py)
+  - 现在它只是兼容层
+  - 真正的因子主实现已经迁到新的 [factors/](factors/) 目录
+
+### 新的因子流水线入口
+
+- 新增 [pipelines/](pipelines/)
+- 新增：
+  - [pipelines/run_factor_research.py](pipelines/run_factor_research.py)
+  - [pipelines/run_factor_selection.py](pipelines/run_factor_selection.py)
+  - [pipelines/run_composite_portfolio.py](pipelines/run_composite_portfolio.py)
+  - [pipelines/run_walk_forward.py](pipelines/run_walk_forward.py)
+  - [pipelines/run_factor_pipeline.py](pipelines/run_factor_pipeline.py)
+- 更新了 [main.py](main.py)
+  - 新增命令：
+    - `factor-research`
+    - `factor-select`
+    - `composite-backtest`
+    - `factor-walk-forward`
+    - `factor-pipeline`
+
+### 配置层扩展
+
+- 更新了 [config/runtime.yaml](config/runtime.yaml)
+- 新增：
+  - `universe`
+  - `standardize`
+  - `factor_research`
+  - `factor_selection`
+  - `composite_model`
+
+### 第一版正式因子研究结果
+
+- 运行了新的正式因子流水线
+- 新报告：
+  - [artifacts/reports/factor_pipeline_20260320_035221.json](artifacts/reports/factor_pipeline_20260320_035221.json)
+  - [artifacts/reports/factor_pipeline_20260320_035221.md](artifacts/reports/factor_pipeline_20260320_035221.md)
+- 当前通过 train / OOS 双重筛选并被冻结的稳定因子是：
+  - `reversal_5`
+  - `true_range_pct_1`
+  - `reversal_3`
+- 冻结文件：
+  - [artifacts/selected_factors/stable_factor_model.json](artifacts/selected_factors/stable_factor_model.json)
+- 这轮研究说明：
+  - 动量和 breakout 这条线在当前样本里方向更偏负
+  - 短期反转和单日振幅冲击更值得继续追
+  - OOS composite 目前接近走平，`Sharpe` 略正但 `CAGR` 仍为负，说明还需要继续收紧因子集合和组合规则
+  - factor walk-forward 的窗口稳定性比旧策略流程更清楚，当前 `positive Sharpe ratio = 72.7%`
+
+### 文档
+
+- 更新了 [README.md](README.md)
+  - 现在把 `factor-pipeline` 放到第一推荐路径
+  - 把旧的策略驱动流程降成次要路径
+  - 补上新的 `factors/ research/ pipelines/` 目录说明
+  - 补上新的命令说明和当前稳定因子名单
+
+## 2026-03-20 1.0.11（短线多因子、Walk-forward 修正、默认池收缩）
+
+### 短线研究方向收口
+
+- 更新了 [alpha_lab/factors.py](alpha_lab/factors.py)
+  - 新增一批更适合 1 到 3 天持有周期的 OHLCV 因子
+  - 重点补充了：
+    - `momentum_3`
+    - `momentum_5`
+    - `momentum_10`
+    - `short_reversal_3`
+    - `overnight_gap_1`
+    - `intraday_return_1`
+    - `close_location_1`
+    - `true_range_pct_1`
+    - `breakout_distance_5`
+    - `volume_surprise_5`
+- 新增 [strategy/multi_factor_short/](strategy/multi_factor_short/)
+  - 作为当前默认的短线多因子主研究策略
+- 新增 [strategy/short_reversal/](strategy/short_reversal/)
+  - 做过一轮短线反转研究
+- 更新了 [strategy/mean_reversion/mean_reversion.py](strategy/mean_reversion/mean_reversion.py)
+  - 收窄成更偏短线反抽的均值回归版本
+
+### 参数搜索与性能优化
+
+- 更新了：
+  - [strategy/mean_reversion/mean_reversion.py](strategy/mean_reversion/mean_reversion.py)
+  - [strategy/short_reversal/short_reversal.py](strategy/short_reversal/short_reversal.py)
+  - [strategy/multi_factor_short/multi_factor_short.py](strategy/multi_factor_short/multi_factor_short.py)
+- 收窄了参数网格
+  - 让搜索更像“验证研究假设”，而不是暴力扫参
+- 给 [strategy/multi_factor_short/multi_factor_short.py](strategy/multi_factor_short/multi_factor_short.py) 加了因子面板缓存
+  - 避免同一份样本在优化阶段重复重算多因子特征
+  - 把完整 `pipeline` 的运行时间压回可接受范围
+
+### Walk-forward 口径修正
+
+- 更新了 [backtest/walk_forward.py](backtest/walk_forward.py)
+  - 修正了旧版本把重叠测试窗口拼接成一个 overall equity 的问题
+  - 现在默认：
+    - `test_months = 6`
+    - `step_months = 6`
+  - 也就是说默认不再使用重叠窗口
+  - 新输出改成窗口稳定性摘要：
+    - `positive_sharpe_ratio`
+    - `positive_calmar_ratio`
+    - `median_sharpe`
+    - `median_cagr`
+    - `worst_window_max_dd`
+- 同步更新了：
+  - [backtest/pipeline.py](backtest/pipeline.py)
+  - [main.py](main.py)
+
+### 默认活跃池调整
+
+- 更新了 [strategy/__init__.py](strategy/__init__.py)
+- 更新了 [backtest/optimizer.py](backtest/optimizer.py)
+- 更新了 [main.py](main.py)
+- 更新了 [config/runtime.yaml](config/runtime.yaml)
+- `short_reversal` 这轮训练、OOS 和整体稳定性都不够理想，已经从默认活跃池中移除
+- 当前默认研究重点只保留：
+  - `multi_factor_short`
+  - `mean_reversion`
+
+### 最新正式短线研究结果
+
+- 重新运行了短线正式流水线
+- 新报告：
+  - [artifacts/reports/pipeline_20260320_030253.json](artifacts/reports/pipeline_20260320_030253.json)
+  - [artifacts/reports/pipeline_20260320_030253.md](artifacts/reports/pipeline_20260320_030253.md)
+- 这轮候选策略是：
+  - `mean_reversion`
+  - `short_reversal`
+  - `multi_factor_short`
+- 结论摘要：
+  - `multi_factor_short`
+    - 训练期最好，Walk-forward 窗口稳定性也最好
+    - 但最近 OOS 仍然为负，说明还不能直接当最终实盘模板
+  - `mean_reversion`
+    - 训练期一般，但最新 OOS 明显转强
+    - 值得继续保留观察
+  - `short_reversal`
+    - 训练和 OOS 都不够理想
+    - 已从默认活跃池降级
+- Alpha 研究这轮筛出的有效短线因子主要集中在：
+  - 短期反转
+  - bar 位置
+  - 短期波动冲击
+  - 近端突破距离
+
+### 文档
+
+- 更新了 [README.md](README.md)
+  - 改成以当前短线研究状态为准
+  - 删掉了默认策略仍是旧长周期池的写法
+  - 加入最新短线报告位置
+  - 写清楚 `walk-forward` 现在默认不重叠
+  - 写清楚当前还没到“最终组合策略上线”的阶段
+
 ## 2026-03-20 1.0.10（VIX 过滤、all/raw 拆分、邮件通知）
 
 ### 策略与数据口径

@@ -131,7 +131,8 @@ def _select_effective_factors(ic_stats: Dict[str, Any], cfg: AlphaResearchConfig
 
 def _build_composite_factor(panel: pd.DataFrame, selected_factors: List[str]) -> pd.Series:
     if not selected_factors:
-        return pd.Series(dtype=float)
+        empty_index = pd.MultiIndex.from_arrays([[], []], names=["timestamp", "symbol"])
+        return pd.Series(dtype=float, index=empty_index, name="composite_factor")
 
     df = panel[["timestamp", "symbol"] + selected_factors].copy()
     normalized_parts = []
@@ -151,7 +152,8 @@ def _build_composite_factor(panel: pd.DataFrame, selected_factors: List[str]) ->
 
 def _build_signals_from_factor_score(score: pd.Series, top_n: int) -> pd.Series:
     if score.empty:
-        return pd.Series(dtype=int)
+        empty_index = pd.MultiIndex.from_arrays([[], []], names=["timestamp", "symbol"])
+        return pd.Series(dtype=int, index=empty_index, name="signal")
 
     score_df = score.rename("score").reset_index()
     score_df["rank"] = score_df.groupby("timestamp")["score"].rank(method="first", ascending=False)

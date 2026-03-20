@@ -18,9 +18,9 @@ class StrategyBlendConfig:
     max_total_exposure: float = 1.0
     min_strategy_weight: float = 0.05
     high_vol_haircut: float = 0.35
-    trend_strategies: tuple[str, ...] = ("trend", "turtle", "pullback", "low_vol_momentum")
-    range_strategies: tuple[str, ...] = ("mean_reversion",)
-    defensive_strategies: tuple[str, ...] = ("low_vol_momentum",)
+    trend_strategies: tuple[str, ...] = ()
+    range_strategies: tuple[str, ...] = ("mean_reversion", "short_reversal")
+    defensive_strategies: tuple[str, ...] = ("multi_factor_short",)
 
 
 def _distribute_equally(total_weight: float, strategies: Iterable[str]) -> Dict[str, float]:
