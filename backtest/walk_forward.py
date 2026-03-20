@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
+import numpy as np
 import pandas as pd
 
 from backtest.engine import BacktestConfig, run_signal_backtest
@@ -33,7 +34,7 @@ class WalkForwardSpec:
     strategies: List[str]
     train_years: int = 3
     test_months: int = 6
-    step_months: int = 3
+    step_months: int = 6
     gap_days: int = 1
     backtest: BacktestConfig = field(default_factory=BacktestConfig)
 
@@ -44,6 +45,37 @@ def _to_utc_ts(value: str) -> pd.Timestamp:
 
 def _month_add(ts: pd.Timestamp, months: int) -> pd.Timestamp:
     return (ts + pd.DateOffset(months=months)).normalize()
+
+
+def _window_summary(windows: List[Dict[str, Any]], wf: WalkForwardSpec) -> Dict[str, float]:
+    if not windows:
+        return {
+            "window_count": 0.0,
+            "overlapping_windows": float(wf.step_months < wf.test_months),
+        }
+
+    sharpes = np.array([float(window["metrics"].get("sharpe", np.nan)) for window in windows], dtype=float)
+    cagrs = np.array([float(window["metrics"].get("cagr", np.nan)) for window in windows], dtype=float)
+    drawdowns = np.array([float(window["metrics"].get("max_dd", np.nan)) for window in windows], dtype=float)
+    calmars = np.array([float(window["metrics"].get("calmar", np.nan)) for window in windows], dtype=float)
+
+    valid_sharpes = sharpes[np.isfinite(sharpes)]
+    valid_cagrs = cagrs[np.isfinite(cagrs)]
+    valid_drawdowns = drawdowns[np.isfinite(drawdowns)]
+    valid_calmars = calmars[np.isfinite(calmars)]
+
+    return {
+        "window_count": float(len(windows)),
+        "overlapping_windows": float(wf.step_months < wf.test_months),
+        "positive_sharpe_ratio": float(np.mean(valid_sharpes > 0.0)) if valid_sharpes.size else np.nan,
+        "positive_calmar_ratio": float(np.mean(valid_calmars > 0.0)) if valid_calmars.size else np.nan,
+        "median_sharpe": float(np.median(valid_sharpes)) if valid_sharpes.size else np.nan,
+        "median_cagr": float(np.median(valid_cagrs)) if valid_cagrs.size else np.nan,
+        "median_max_dd": float(np.median(valid_drawdowns)) if valid_drawdowns.size else np.nan,
+        "mean_sharpe": float(np.mean(valid_sharpes)) if valid_sharpes.size else np.nan,
+        "mean_cagr": float(np.mean(valid_cagrs)) if valid_cagrs.size else np.nan,
+        "worst_window_max_dd": float(np.min(valid_drawdowns)) if valid_drawdowns.size else np.nan,
+    }
 
 
 def run_walk_forward(ohlcv: pd.DataFrame, wf: WalkForwardSpec) -> Dict[str, Any]:
@@ -67,7 +99,6 @@ def run_walk_forward(ohlcv: pd.DataFrame, wf: WalkForwardSpec) -> Dict[str, Any]
         generated = strategy.generate(sample, params)
 
         windows = []
-        equity_all = pd.Series(dtype=float)
         cursor = start_ts
 
         while True:
@@ -90,30 +121,12 @@ def run_walk_forward(ohlcv: pd.DataFrame, wf: WalkForwardSpec) -> Dict[str, Any]
                 }
             )
 
-            if not equity.empty:
-                equity_all = pd.concat([equity_all, equity])
-                equity_all = equity_all[~equity_all.index.duplicated(keep="last")]
-
             cursor = _month_add(cursor, wf.step_months)
-
-        overall_metrics = {}
-        if not equity_all.empty:
-            overall_returns = equity_all.pct_change().dropna()
-            peak = equity_all.cummax()
-            max_dd = float((equity_all / peak - 1.0).min())
-            years = max((equity_all.index[-1] - equity_all.index[0]).days / 365.25, 1e-9)
-            cagr = float((equity_all.iloc[-1] / equity_all.iloc[0]) ** (1.0 / years) - 1.0)
-            overall_metrics = {
-                "sharpe": float(overall_returns.mean() / (overall_returns.std(ddof=0) + 1e-12) * (252.0 ** 0.5)),
-                "cagr": cagr,
-                "max_dd": max_dd,
-                "calmar": float(cagr / (abs(max_dd) + 1e-12)),
-            }
 
         results["strategies"][name] = {
             "frozen_file": os.path.join("artifacts", "frozen_params", f"{name}.json"),
             "windows": windows,
-            "overall_metrics": overall_metrics,
+            "window_summary": _window_summary(windows, wf),
         }
 
     report_path = os.path.join(

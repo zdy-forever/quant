@@ -1,6 +1,11 @@
 {
-  "updated_at_utc": "2026-03-19T23:10:39.449619+00:00",
+  "updated_at_utc": "2026-03-20T02:55:24.899143+00:00",
   "strategies": {
+    "compression_breakout": {
+      "file": "artifacts\\frozen_params\\compression_breakout.json",
+      "sha256": "c04b43b2357540d5a91434205342a269baa8720db959007028f5b17740e21a21",
+      "frozen_at_utc": "2026-03-20T01:06:33.845938+00:00"
+    },
     "low_vol_momentum": {
       "file": "artifacts\\frozen_params\\low_vol_momentum.json",
       "sha256": "591ff1387303261912d0cba4e34e91f88a235c19b65469b6025cb9e59d1fbb55",
@@ -8,13 +13,23 @@
     },
     "mean_reversion": {
       "file": "artifacts\\frozen_params\\mean_reversion.json",
-      "sha256": "f0cc40d64243623649ed5a1cd1e2766a480b5a40d3420779ef934b47255ec84c",
-      "frozen_at_utc": "2026-03-19T10:36:04.965427+00:00"
+      "sha256": "05810fc0d23691d86e494bef9cf88dedc3551e3cbea20f882b22141a63435660",
+      "frozen_at_utc": "2026-03-20T02:55:24.896008+00:00"
+    },
+    "multi_factor_short": {
+      "file": "artifacts\\frozen_params\\multi_factor_short.json",
+      "sha256": "41d2401fe03f7976471b151415a3002039ff139f752b8a4e4ecf4e1f5c5fe77f",
+      "frozen_at_utc": "2026-03-20T02:48:03.289214+00:00"
     },
     "pullback": {
       "file": "artifacts\\frozen_params\\pullback.json",
       "sha256": "1d48ce4fa97fd29e2aea8c4e898b89c344ff744c549b55350cb9aa47d43d74b6",
       "frozen_at_utc": "2026-03-19T10:37:58.957429+00:00"
+    },
+    "short_reversal": {
+      "file": "artifacts\\frozen_params\\short_reversal.json",
+      "sha256": "1236dfa66d89b45f6c75a6e389c12456bf7287b30985bd3959eaf2333aa08f8e",
+      "frozen_at_utc": "2026-03-20T02:51:49.995461+00:00"
     },
     "trend": {
       "file": "artifacts\\frozen_params\\trend.json",

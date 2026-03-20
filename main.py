@@ -22,6 +22,19 @@ import os
 from typing import TYPE_CHECKING, Any, Dict, List
 from zoneinfo import ZoneInfo
 import pandas as pd
+from pipelines.run_alpha_combo_search import AlphaComboSearchSpec, run_alpha_combo_search
+from pipelines.run_alpha_combo_walk_forward import AlphaComboWalkForwardSpec, run_alpha_combo_walk_forward
+from pipelines.run_alpha_combo_risk_search import AlphaComboRiskSearchSpec, run_alpha_combo_risk_search
+from pipelines.run_composite_portfolio import FactorPortfolioSpec, run_composite_portfolio
+from pipelines.run_factor_pipeline import FactorPipelineSpec, run_factor_pipeline
+from pipelines.run_factor_research import FactorResearchSpec, run_factor_research
+from pipelines.run_factor_selection import FactorFreezeSpec, run_factor_selection
+from pipelines.run_walk_forward import FactorWalkForwardSpec, run_factor_walk_forward
+from research.factor_combo_search import FactorComboSearchConfig
+from research.factor_engine import UniverseConfig, build_factor_research_panel
+from research.factor_selection import FactorSelectionConfig
+from research.factor_tests import FactorTestConfig
+from research.standardize import StandardizeConfig
 
 if TYPE_CHECKING:
     from regime.detection import RegimeLabel
@@ -33,6 +46,7 @@ FREE_PLAN_DELAY_MINUTES = 15
 OHLCV_CACHE_DIR = os.path.join("artifacts", "cache", "ohlcv")
 ALPACA_SYMBOL_CHUNK_SIZE = 50
 DEFAULT_BAR_ADJUSTMENT = "all"
+DEFAULT_ACTIVE_STRATEGIES = ["mean_reversion", "multi_factor_short"]
 
 
 def get_research_adjustment(runtime: dict) -> str:
@@ -223,7 +237,7 @@ def fetch_daily_ohlcv(
     adjustment_value = str(adjustment or DEFAULT_BAR_ADJUSTMENT).strip().lower()
     cache_path = _ohlcv_cache_path(clean_symbols, start, end, adjustment_value)
     if os.path.exists(cache_path):
-        cached = pd.read_csv(cache_path)
+        cached: pd.DataFrame = pd.read_csv(str(cache_path))
         cached["timestamp"] = pd.to_datetime(cached["timestamp"], utc=True)
         cached["symbol"] = cached["symbol"].astype(str)
         return cached[["timestamp", "symbol", "open", "high", "low", "close", "volume"]].sort_values(
@@ -553,6 +567,425 @@ def cmd_alpha_research(args: argparse.Namespace) -> None:
     _notify_research("alpha-research", result)
 
 
+def _load_factor_runtime_components(runtime: dict):
+    universe_cfg = UniverseConfig(**(runtime.get("universe", {}) or {}))
+    standardize_cfg = StandardizeConfig(**(runtime.get("standardize", {}) or {}))
+    factor_cfg = runtime.get("factor_research", {}) or {}
+    selection_raw = runtime.get("factor_selection", {}) or {}
+
+    test_cfg = FactorTestConfig(
+        forward_days=list(factor_cfg.get("forward_days", [1, 2, 3, 5])),
+        quantiles=int(factor_cfg.get("quantiles", 5)),
+        primary_horizon=int(factor_cfg.get("primary_horizon", 5)),
+        min_cross_section=int(factor_cfg.get("min_cross_section", 20)),
+    )
+    selection_cfg = FactorSelectionConfig(
+        primary_horizon=int(selection_raw.get("primary_horizon", test_cfg.primary_horizon)),
+        min_train_rank_ic=float(selection_raw.get("min_train_rank_ic", 0.01)),
+        min_oos_rank_ic=float(selection_raw.get("min_oos_rank_ic", 0.005)),
+        min_train_spread=float(selection_raw.get("min_train_spread", 0.0)),
+        min_oos_spread=float(selection_raw.get("min_oos_spread", 0.0)),
+        min_train_hit_rate=float(selection_raw.get("min_train_hit_rate", 0.50)),
+        min_oos_hit_rate=float(selection_raw.get("min_oos_hit_rate", 0.50)),
+        max_factors=int(selection_raw.get("max_factors", 6)),
+    )
+    return universe_cfg, standardize_cfg, test_cfg, selection_cfg
+
+
+def _load_composite_runtime(runtime: dict, args: argparse.Namespace) -> tuple[int, int]:
+    composite_cfg = runtime.get("composite_model", {}) or {}
+    top_n = int(getattr(args, "top_n", None) or composite_cfg.get("top_n", 10))
+    rebalance_every_n_days = int(
+        getattr(args, "rebalance_every_n_days", None) or composite_cfg.get("rebalance_every_n_days", 1)
+    )
+    return top_n, rebalance_every_n_days
+
+
+def _load_factor_combo_runtime(runtime: dict, test_cfg) -> dict:
+    combo_raw = runtime.get("factor_combo_search", {}) or {}
+    return {
+        "primary_horizon": int(combo_raw.get("primary_horizon", getattr(test_cfg, "primary_horizon", 5))),
+        "min_train_rank_ic": float(combo_raw.get("min_train_rank_ic", 0.01)),
+        "min_oos_rank_ic": float(combo_raw.get("min_oos_rank_ic", 0.005)),
+        "min_train_spread": float(combo_raw.get("min_train_spread", 0.0)),
+        "min_oos_spread": float(combo_raw.get("min_oos_spread", 0.0)),
+        "min_train_hit_rate": float(combo_raw.get("min_train_hit_rate", 0.50)),
+        "min_oos_hit_rate": float(combo_raw.get("min_oos_hit_rate", 0.50)),
+        "candidate_pool_size": int(combo_raw.get("candidate_pool_size", 8)),
+        "min_combo_size": int(combo_raw.get("min_combo_size", 2)),
+        "max_combo_size": int(combo_raw.get("max_combo_size", 4)),
+        "max_pairwise_correlation": float(combo_raw.get("max_pairwise_correlation", 0.30)),
+        "max_combinations": int(combo_raw.get("max_combinations", 12)),
+    }
+
+
+def _load_alpha_trade_filters_runtime(runtime: dict) -> dict:
+    filter_raw = runtime.get("alpha_trade_filters", {}) or {}
+    return {
+        "min_close_location_1": float(filter_raw.get("min_close_location_1", 0.05)),
+        "max_true_range_pct_1": float(filter_raw.get("max_true_range_pct_1", 0.09)),
+        "max_volume_surprise_5": float(filter_raw.get("max_volume_surprise_5", 4.0)),
+        "max_abs_ma_distance_20": float(filter_raw.get("max_abs_ma_distance_20", 0.15)),
+        "min_liquidity_20": float(filter_raw.get("min_liquidity_20", 16.0)),
+    }
+
+
+def cmd_factor_research(args: argparse.Namespace) -> None:
+    from backtest.engine import BacktestConfig
+
+    runtime = load_runtime_config()
+    data_client, _ = get_alpaca_clients()
+    symbols = load_symbols()
+
+    fetch_start = min(args.train_start, args.oos_start)
+    fetch_end = max(args.train_end, args.oos_end)
+    ohlcv = fetch_daily_ohlcv(
+        data_client,
+        symbols,
+        fetch_start,
+        fetch_end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    _ = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    universe_cfg, standardize_cfg, test_cfg, _ = _load_factor_runtime_components(runtime)
+
+    result = run_factor_research(
+        ohlcv,
+        FactorResearchSpec(
+            train_start=args.train_start,
+            train_end=args.train_end,
+            oos_start=args.oos_start,
+            oos_end=args.oos_end,
+            candidate_factors=args.candidate_factors,
+        ),
+        universe_cfg,
+        standardize_cfg,
+        test_cfg,
+    )
+    public_result = {
+        "spec": result["spec"],
+        "engine": result["engine"],
+        "train": result["train"],
+        "oos": result["oos"],
+        "panel_stats": {
+            "raw_rows": int(result["raw_panel"].shape[0]),
+            "standardized_rows": int(result["standardized_panel"].shape[0]),
+        },
+    }
+    print(json.dumps(public_result, ensure_ascii=False, indent=2))
+    _notify_research("factor-research", public_result)
+
+
+def cmd_factor_select(args: argparse.Namespace) -> None:
+    runtime = load_runtime_config()
+    data_client, _ = get_alpaca_clients()
+    symbols = load_symbols()
+
+    fetch_start = min(args.train_start, args.oos_start)
+    fetch_end = max(args.train_end, args.oos_end)
+    ohlcv = fetch_daily_ohlcv(
+        data_client,
+        symbols,
+        fetch_start,
+        fetch_end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    universe_cfg, standardize_cfg, test_cfg, selection_cfg = _load_factor_runtime_components(runtime)
+    research = run_factor_research(
+        ohlcv,
+        FactorResearchSpec(
+            train_start=args.train_start,
+            train_end=args.train_end,
+            oos_start=args.oos_start,
+            oos_end=args.oos_end,
+            candidate_factors=args.candidate_factors,
+        ),
+        universe_cfg,
+        standardize_cfg,
+        test_cfg,
+    )
+    result = run_factor_selection(
+        research,
+        selection_cfg,
+        freeze_spec=FactorFreezeSpec(overwrite=args.overwrite_frozen),
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _notify_research("factor-select", result)
+
+
+def cmd_composite_backtest(args: argparse.Namespace) -> None:
+    from backtest.engine import BacktestConfig
+
+    runtime = load_runtime_config()
+    data_client, _ = get_alpaca_clients()
+    symbols = load_symbols()
+
+    fetch_start = min(args.train_start, args.oos_start)
+    fetch_end = max(args.train_end, args.oos_end)
+    ohlcv = fetch_daily_ohlcv(
+        data_client,
+        symbols,
+        fetch_start,
+        fetch_end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    universe_cfg, standardize_cfg, test_cfg, selection_cfg = _load_factor_runtime_components(runtime)
+    top_n, rebalance_every_n_days = _load_composite_runtime(runtime, args)
+
+    research = run_factor_research(
+        ohlcv,
+        FactorResearchSpec(
+            train_start=args.train_start,
+            train_end=args.train_end,
+            oos_start=args.oos_start,
+            oos_end=args.oos_end,
+            candidate_factors=args.candidate_factors,
+        ),
+        universe_cfg,
+        standardize_cfg,
+        test_cfg,
+    )
+    selection = run_factor_selection(research, selection_cfg, freeze_spec=None)
+    result = run_composite_portfolio(
+        ohlcv,
+        research["standardized_panel"],
+        selection["stable_factors"] or selection["train_selected_factors"],
+        FactorPortfolioSpec(
+            start=args.oos_start,
+            end=args.oos_end,
+            top_n=top_n,
+            rebalance_every_n_days=rebalance_every_n_days,
+        ),
+        backtest_cfg,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _notify_research("composite-backtest", result)
+
+
+def cmd_factor_walk_forward(args: argparse.Namespace) -> None:
+    from backtest.engine import BacktestConfig
+
+    runtime = load_runtime_config()
+    data_client, _ = get_alpaca_clients()
+    symbols = load_symbols()
+    ohlcv = fetch_daily_ohlcv(
+        data_client,
+        symbols,
+        args.start,
+        args.end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    universe_cfg, standardize_cfg, test_cfg, selection_cfg = _load_factor_runtime_components(runtime)
+    top_n, _ = _load_composite_runtime(runtime, args)
+
+    engine = build_factor_research_panel(ohlcv, universe_cfg, standardize_cfg)
+    if args.candidate_factors:
+        keep = set(args.candidate_factors)
+        factor_names = [name for name in engine["factor_names"] if name in keep]
+        meta_cols = [col for col in engine["standardized_panel"].columns if col not in engine["factor_names"]]
+        engine["standardized_panel"] = engine["standardized_panel"][meta_cols + factor_names].copy()
+        engine["factor_names"] = factor_names
+
+    result = run_factor_walk_forward(
+        ohlcv,
+        engine["standardized_panel"],
+        test_cfg,
+        selection_cfg,
+        backtest_cfg,
+        FactorWalkForwardSpec(
+            start=args.start,
+            end=args.end,
+            train_years=args.train_years,
+            test_months=args.test_months,
+            step_months=args.step_months,
+            gap_days=args.gap_days,
+            top_n=top_n,
+        ),
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _notify_research("factor-walk-forward", result)
+
+
+def cmd_factor_pipeline(args: argparse.Namespace) -> None:
+    from backtest.engine import BacktestConfig
+
+    runtime = load_runtime_config()
+    data_client, _ = get_alpaca_clients()
+    symbols = load_symbols()
+
+    fetch_start = min(args.train_start, args.oos_start, args.walk_forward_start)
+    fetch_end = max(args.train_end, args.oos_end, args.walk_forward_end)
+    ohlcv = fetch_daily_ohlcv(
+        data_client,
+        symbols,
+        fetch_start,
+        fetch_end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    universe_cfg, standardize_cfg, test_cfg, selection_cfg = _load_factor_runtime_components(runtime)
+    top_n, rebalance_every_n_days = _load_composite_runtime(runtime, args)
+
+    result = run_factor_pipeline(
+        ohlcv,
+        FactorPipelineSpec(
+            train_start=args.train_start,
+            train_end=args.train_end,
+            oos_start=args.oos_start,
+            oos_end=args.oos_end,
+            walk_forward_start=args.walk_forward_start,
+            walk_forward_end=args.walk_forward_end,
+            candidate_factors=args.candidate_factors,
+            top_n=top_n,
+            rebalance_every_n_days=rebalance_every_n_days,
+            overwrite_frozen=args.overwrite_frozen,
+            walk_forward_train_years=args.train_years,
+            walk_forward_test_months=args.test_months,
+            walk_forward_step_months=args.step_months,
+            walk_forward_gap_days=args.gap_days,
+        ),
+        universe_cfg,
+        standardize_cfg,
+        test_cfg,
+        selection_cfg,
+        backtest_cfg,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _notify_research("factor-pipeline", result)
+
+
+def cmd_alpha_combo_search(args: argparse.Namespace) -> None:
+    from backtest.engine import BacktestConfig
+
+    runtime = load_runtime_config()
+    data_client, _ = get_alpaca_clients()
+    symbols = load_symbols()
+
+    fetch_start = min(args.train_start, args.oos_start)
+    fetch_end = max(args.train_end, args.oos_end)
+    ohlcv = fetch_daily_ohlcv(
+        data_client,
+        symbols,
+        fetch_start,
+        fetch_end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    universe_cfg, standardize_cfg, test_cfg, _ = _load_factor_runtime_components(runtime)
+    combo_cfg = FactorComboSearchConfig(**_load_factor_combo_runtime(runtime, test_cfg))
+    trade_filters = _load_alpha_trade_filters_runtime(runtime)
+    top_n, rebalance_every_n_days = _load_composite_runtime(runtime, args)
+
+    result = run_alpha_combo_search(
+        ohlcv,
+        AlphaComboSearchSpec(
+            train_start=args.train_start,
+            train_end=args.train_end,
+            oos_start=args.oos_start,
+            oos_end=args.oos_end,
+            candidate_factors=args.candidate_factors,
+            top_n=top_n,
+            rebalance_every_n_days=rebalance_every_n_days,
+            trade_filters=trade_filters,
+        ),
+        universe_cfg,
+        standardize_cfg,
+        test_cfg,
+        combo_cfg,
+        backtest_cfg,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _notify_research("alpha-combo-search", result)
+
+
+def cmd_alpha_combo_walk_forward(args: argparse.Namespace) -> None:
+    from backtest.engine import BacktestConfig
+
+    runtime = load_runtime_config()
+    data_client, _ = get_alpaca_clients()
+    symbols = load_symbols()
+    ohlcv = fetch_daily_ohlcv(
+        data_client,
+        symbols,
+        args.start,
+        args.end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    universe_cfg, standardize_cfg, test_cfg, _ = _load_factor_runtime_components(runtime)
+    combo_cfg = FactorComboSearchConfig(**_load_factor_combo_runtime(runtime, test_cfg))
+    trade_filters = _load_alpha_trade_filters_runtime(runtime)
+    top_n, rebalance_every_n_days = _load_composite_runtime(runtime, args)
+
+    result = run_alpha_combo_walk_forward(
+        ohlcv,
+        AlphaComboWalkForwardSpec(
+            start=args.start,
+            end=args.end,
+            train_years=args.train_years,
+            test_months=args.test_months,
+            step_months=args.step_months,
+            gap_days=args.gap_days,
+            candidate_factors=args.candidate_factors,
+            top_n=top_n,
+            rebalance_every_n_days=rebalance_every_n_days,
+            trade_filters=trade_filters,
+        ),
+        universe_cfg,
+        standardize_cfg,
+        test_cfg,
+        combo_cfg,
+        backtest_cfg,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _notify_research("alpha-combo-walk-forward", result)
+
+
+def cmd_alpha_combo_risk_search(args: argparse.Namespace) -> None:
+    from backtest.engine import BacktestConfig
+
+    runtime = load_runtime_config()
+    data_client, _ = get_alpaca_clients()
+    symbols = load_symbols()
+    fetch_start = min(args.train_start, args.oos_start)
+    fetch_end = max(args.train_end, args.oos_end)
+    ohlcv = fetch_daily_ohlcv(
+        data_client,
+        symbols,
+        fetch_start,
+        fetch_end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    universe_cfg, standardize_cfg, test_cfg, _ = _load_factor_runtime_components(runtime)
+    trade_filters = _load_alpha_trade_filters_runtime(runtime)
+
+    result = run_alpha_combo_risk_search(
+        ohlcv,
+        AlphaComboRiskSearchSpec(
+            train_start=args.train_start,
+            train_end=args.train_end,
+            oos_start=args.oos_start,
+            oos_end=args.oos_end,
+            target_max_dd=args.target_max_dd,
+            trade_filters=trade_filters,
+            gross_exposure_grid=args.gross_exposure_grid,
+            top_n_grid=args.top_n_grid,
+            stop_loss_grid=args.stop_loss_grid,
+            trailing_stop_grid=args.trailing_stop_grid,
+            max_holding_days_grid=args.max_holding_days_grid,
+        ),
+        universe_cfg,
+        standardize_cfg,
+        test_cfg,
+        backtest_cfg,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _notify_research("alpha-combo-risk-search", result)
+
+
 def cmd_pipeline(args: argparse.Namespace) -> None:
     from alpha_lab.research import AlphaResearchConfig
     from backtest.engine import BacktestConfig
@@ -743,7 +1176,7 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser = subparsers.add_parser("train", help="Train on in-sample data and freeze parameters")
     train_parser.add_argument("--start", required=True)
     train_parser.add_argument("--end", required=True)
-    train_parser.add_argument("--strategies", nargs="+", default=["trend", "turtle", "pullback", "low_vol_momentum", "mean_reversion"])
+    train_parser.add_argument("--strategies", nargs="+", default=DEFAULT_ACTIVE_STRATEGIES.copy())
     train_parser.add_argument("--objective", default="sharpe", choices=["sharpe", "cagr", "calmar"])
     train_parser.add_argument("--overwrite-frozen", action="store_true")
     train_parser.set_defaults(fn=cmd_train)
@@ -751,23 +1184,23 @@ def build_parser() -> argparse.ArgumentParser:
     optimize_parser = subparsers.add_parser("optimize", help="Search for the best strategy parameters")
     optimize_parser.add_argument("--start", required=True)
     optimize_parser.add_argument("--end", required=True)
-    optimize_parser.add_argument("--strategies", nargs="+", default=["trend", "turtle", "pullback", "low_vol_momentum", "mean_reversion"])
+    optimize_parser.add_argument("--strategies", nargs="+", default=DEFAULT_ACTIVE_STRATEGIES.copy())
     optimize_parser.add_argument("--objective", default="sharpe", choices=["sharpe", "cagr", "calmar"])
     optimize_parser.set_defaults(fn=cmd_optimize)
 
     test_parser = subparsers.add_parser("test", help="Run immutable out-of-sample testing")
     test_parser.add_argument("--start", required=True)
     test_parser.add_argument("--end", required=True)
-    test_parser.add_argument("--strategies", nargs="+", default=["trend", "turtle", "pullback", "low_vol_momentum", "mean_reversion"])
+    test_parser.add_argument("--strategies", nargs="+", default=DEFAULT_ACTIVE_STRATEGIES.copy())
     test_parser.set_defaults(fn=cmd_test)
 
     wf_parser = subparsers.add_parser("walk-forward", help="Run walk-forward validation")
     wf_parser.add_argument("--start", required=True)
     wf_parser.add_argument("--end", required=True)
-    wf_parser.add_argument("--strategies", nargs="+", default=["trend", "turtle", "pullback", "low_vol_momentum", "mean_reversion"])
+    wf_parser.add_argument("--strategies", nargs="+", default=DEFAULT_ACTIVE_STRATEGIES.copy())
     wf_parser.add_argument("--train-years", type=int, default=3)
     wf_parser.add_argument("--test-months", type=int, default=6)
-    wf_parser.add_argument("--step-months", type=int, default=3)
+    wf_parser.add_argument("--step-months", type=int, default=6)
     wf_parser.add_argument("--gap-days", type=int, default=1)
     wf_parser.set_defaults(fn=cmd_walk_forward)
 
@@ -775,6 +1208,122 @@ def build_parser() -> argparse.ArgumentParser:
     alpha_parser.add_argument("--start", required=True)
     alpha_parser.add_argument("--end", required=True)
     alpha_parser.set_defaults(fn=cmd_alpha_research)
+
+    factor_research_parser = subparsers.add_parser(
+        "factor-research",
+        help="Run universe definition, factor generation and single-factor validation on train/OOS windows",
+    )
+    factor_research_parser.add_argument("--train-start", required=True)
+    factor_research_parser.add_argument("--train-end", required=True)
+    factor_research_parser.add_argument("--oos-start", required=True)
+    factor_research_parser.add_argument("--oos-end", required=True)
+    factor_research_parser.add_argument("--candidate-factors", nargs="+", default=None)
+    factor_research_parser.set_defaults(fn=cmd_factor_research)
+
+    factor_select_parser = subparsers.add_parser(
+        "factor-select",
+        help="Select stable factors from train/OOS validation and freeze the factor model",
+    )
+    factor_select_parser.add_argument("--train-start", required=True)
+    factor_select_parser.add_argument("--train-end", required=True)
+    factor_select_parser.add_argument("--oos-start", required=True)
+    factor_select_parser.add_argument("--oos-end", required=True)
+    factor_select_parser.add_argument("--candidate-factors", nargs="+", default=None)
+    factor_select_parser.add_argument("--overwrite-frozen", dest="overwrite_frozen", action="store_true")
+    factor_select_parser.add_argument("--no-overwrite-frozen", dest="overwrite_frozen", action="store_false")
+    factor_select_parser.set_defaults(fn=cmd_factor_select, overwrite_frozen=True)
+
+    composite_parser = subparsers.add_parser(
+        "composite-backtest",
+        help="Build a composite score from stable factors and backtest the OOS factor portfolio",
+    )
+    composite_parser.add_argument("--train-start", required=True)
+    composite_parser.add_argument("--train-end", required=True)
+    composite_parser.add_argument("--oos-start", required=True)
+    composite_parser.add_argument("--oos-end", required=True)
+    composite_parser.add_argument("--candidate-factors", nargs="+", default=None)
+    composite_parser.add_argument("--top-n", type=int, default=None)
+    composite_parser.add_argument("--rebalance-every-n-days", type=int, default=None)
+    composite_parser.set_defaults(fn=cmd_composite_backtest)
+
+    factor_wf_parser = subparsers.add_parser(
+        "factor-walk-forward",
+        help="Run factor-driven walk-forward using train-selected factors and OOS composite portfolios",
+    )
+    factor_wf_parser.add_argument("--start", required=True)
+    factor_wf_parser.add_argument("--end", required=True)
+    factor_wf_parser.add_argument("--candidate-factors", nargs="+", default=None)
+    factor_wf_parser.add_argument("--train-years", type=int, default=3)
+    factor_wf_parser.add_argument("--test-months", type=int, default=6)
+    factor_wf_parser.add_argument("--step-months", type=int, default=6)
+    factor_wf_parser.add_argument("--gap-days", type=int, default=1)
+    factor_wf_parser.add_argument("--top-n", type=int, default=None)
+    factor_wf_parser.set_defaults(fn=cmd_factor_walk_forward)
+
+    factor_pipeline_parser = subparsers.add_parser(
+        "factor-pipeline",
+        help="Run factor research, selection, composite OOS and factor walk-forward in one pass",
+    )
+    factor_pipeline_parser.add_argument("--train-start", required=True)
+    factor_pipeline_parser.add_argument("--train-end", required=True)
+    factor_pipeline_parser.add_argument("--oos-start", required=True)
+    factor_pipeline_parser.add_argument("--oos-end", required=True)
+    factor_pipeline_parser.add_argument("--walk-forward-start", required=True)
+    factor_pipeline_parser.add_argument("--walk-forward-end", required=True)
+    factor_pipeline_parser.add_argument("--candidate-factors", nargs="+", default=None)
+    factor_pipeline_parser.add_argument("--top-n", type=int, default=None)
+    factor_pipeline_parser.add_argument("--rebalance-every-n-days", type=int, default=None)
+    factor_pipeline_parser.add_argument("--train-years", type=int, default=3)
+    factor_pipeline_parser.add_argument("--test-months", type=int, default=6)
+    factor_pipeline_parser.add_argument("--step-months", type=int, default=6)
+    factor_pipeline_parser.add_argument("--gap-days", type=int, default=1)
+    factor_pipeline_parser.add_argument("--overwrite-frozen", dest="overwrite_frozen", action="store_true")
+    factor_pipeline_parser.add_argument("--no-overwrite-frozen", dest="overwrite_frozen", action="store_false")
+    factor_pipeline_parser.set_defaults(fn=cmd_factor_pipeline, overwrite_frozen=True)
+
+    combo_search_parser = subparsers.add_parser(
+        "alpha-combo-search",
+        help="Search multiple low-correlation composite alpha combinations and backtest them on train/OOS windows",
+    )
+    combo_search_parser.add_argument("--train-start", required=True)
+    combo_search_parser.add_argument("--train-end", required=True)
+    combo_search_parser.add_argument("--oos-start", required=True)
+    combo_search_parser.add_argument("--oos-end", required=True)
+    combo_search_parser.add_argument("--candidate-factors", nargs="+", default=None)
+    combo_search_parser.add_argument("--top-n", type=int, default=None)
+    combo_search_parser.add_argument("--rebalance-every-n-days", type=int, default=None)
+    combo_search_parser.set_defaults(fn=cmd_alpha_combo_search)
+
+    combo_wf_parser = subparsers.add_parser(
+        "alpha-combo-walk-forward",
+        help="Run walk-forward validation for low-correlation alpha combinations with strict trade filters",
+    )
+    combo_wf_parser.add_argument("--start", required=True)
+    combo_wf_parser.add_argument("--end", required=True)
+    combo_wf_parser.add_argument("--candidate-factors", nargs="+", default=None)
+    combo_wf_parser.add_argument("--train-years", type=int, default=3)
+    combo_wf_parser.add_argument("--test-months", type=int, default=6)
+    combo_wf_parser.add_argument("--step-months", type=int, default=6)
+    combo_wf_parser.add_argument("--gap-days", type=int, default=1)
+    combo_wf_parser.add_argument("--top-n", type=int, default=None)
+    combo_wf_parser.add_argument("--rebalance-every-n-days", type=int, default=None)
+    combo_wf_parser.set_defaults(fn=cmd_alpha_combo_walk_forward)
+
+    combo_risk_parser = subparsers.add_parser(
+        "alpha-combo-risk-search",
+        help="Search stricter hard-stop and risk settings for the frozen low-correlation alpha combo",
+    )
+    combo_risk_parser.add_argument("--train-start", required=True)
+    combo_risk_parser.add_argument("--train-end", required=True)
+    combo_risk_parser.add_argument("--oos-start", required=True)
+    combo_risk_parser.add_argument("--oos-end", required=True)
+    combo_risk_parser.add_argument("--target-max-dd", type=float, default=0.15)
+    combo_risk_parser.add_argument("--gross-exposure-grid", nargs="+", type=float, default=None)
+    combo_risk_parser.add_argument("--top-n-grid", nargs="+", type=int, default=None)
+    combo_risk_parser.add_argument("--stop-loss-grid", nargs="+", type=float, default=None)
+    combo_risk_parser.add_argument("--trailing-stop-grid", nargs="+", type=float, default=None)
+    combo_risk_parser.add_argument("--max-holding-days-grid", nargs="+", type=int, default=None)
+    combo_risk_parser.set_defaults(fn=cmd_alpha_combo_risk_search)
 
     pipeline_parser = subparsers.add_parser(
         "pipeline",
@@ -789,13 +1338,13 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline_parser.add_argument(
         "--candidate-strategies",
         nargs="+",
-        default=["trend", "turtle", "pullback", "low_vol_momentum", "mean_reversion"],
+        default=DEFAULT_ACTIVE_STRATEGIES.copy(),
     )
     pipeline_parser.add_argument("--objective", default="calmar", choices=["sharpe", "cagr", "calmar"])
     pipeline_parser.add_argument("--max-strategies", type=int, default=3)
     pipeline_parser.add_argument("--train-years", type=int, default=3)
     pipeline_parser.add_argument("--test-months", type=int, default=6)
-    pipeline_parser.add_argument("--step-months", type=int, default=3)
+    pipeline_parser.add_argument("--step-months", type=int, default=6)
     pipeline_parser.add_argument("--gap-days", type=int, default=1)
     pipeline_parser.add_argument("--overwrite-frozen", dest="overwrite_frozen", action="store_true")
     pipeline_parser.add_argument("--no-overwrite-frozen", dest="overwrite_frozen", action="store_false")

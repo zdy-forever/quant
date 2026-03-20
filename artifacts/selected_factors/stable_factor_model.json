@@ -1,0 +1,96 @@
+{
+  "generated_at_utc": "2026-03-20T03:38:50Z",
+  "research_spec": {
+    "train_start": "2016-01-01",
+    "train_end": "2021-12-31",
+    "oos_start": "2022-01-01",
+    "oos_end": "2024-12-31",
+    "candidate_factors": null
+  },
+  "factor_definitions": {
+    "reversal_5": {
+      "name": "reversal_5",
+      "category": "reversal",
+      "description": "过去 5 日收益率取负号，值越大代表短期越超跌。",
+      "source_title": "Fads, Martingales, and Market Efficiency",
+      "source_url": "https://www.nber.org/papers/w2533",
+      "source_note": "短期反转核心 proxy，后续会在横截面里排序验证。"
+    },
+    "true_range_pct_1": {
+      "name": "true_range_pct_1",
+      "category": "volatility",
+      "description": "当日真实波幅占前收盘比重，用来度量单日振幅冲击。",
+      "source_title": "Trading Volume and Serial Correlation in Stock Returns",
+      "source_url": "https://academic.oup.com/qje/article/108/4/905/1899978",
+      "source_note": "高波动与高交易活跃度往往一起出现，这里把单日振幅单独抽出来做检验。"
+    },
+    "reversal_3": {
+      "name": "reversal_3",
+      "category": "reversal",
+      "description": "过去 3 日收益率取负号，值越大代表短期越超跌。",
+      "source_title": "Fads, Martingales, and Market Efficiency",
+      "source_url": "https://www.nber.org/papers/w2533",
+      "source_note": "Lehmann 的短期反转文献线，工程上用 3 日窗口做更贴近 swing 的 proxy。"
+    }
+  },
+  "selection": {
+    "config": {
+      "primary_horizon": 5,
+      "min_train_rank_ic": 0.01,
+      "min_oos_rank_ic": 0.005,
+      "min_train_spread": 0.0,
+      "min_oos_spread": 0.0,
+      "min_train_hit_rate": 0.5,
+      "min_oos_hit_rate": 0.5,
+      "max_factors": 4
+    },
+    "train_selected_factors": [
+      "reversal_5",
+      "true_range_pct_1",
+      "reversal_3"
+    ],
+    "stable_factors": [
+      "reversal_5",
+      "true_range_pct_1",
+      "reversal_3"
+    ],
+    "ranked_factors": [
+      {
+        "factor": "reversal_5",
+        "train_rank_ic": 0.016859532367111355,
+        "train_spread": 0.0018754866966080661,
+        "train_hit_rate": 0.5152143845089903,
+        "selection_score": 0.01236431866596037
+      },
+      {
+        "factor": "true_range_pct_1",
+        "train_rank_ic": 0.013272553986328319,
+        "train_spread": 0.002315676303552221,
+        "train_hit_rate": 0.5511756569847857,
+        "selection_score": 0.009985490681495488
+      },
+      {
+        "factor": "reversal_3",
+        "train_rank_ic": 0.013215131936621261,
+        "train_spread": 0.0018110021156148525,
+        "train_hit_rate": 0.5055325034578146,
+        "selection_score": 0.009793892990319339
+      }
+    ],
+    "dropped_factors": {
+      "momentum_20": "train_rank_ic=-0.0209 低于阈值",
+      "momentum_60": "train_rank_ic=-0.0079 低于阈值",
+      "trend_pullback_20_5": "train_rank_ic=-0.0142 低于阈值",
+      "low_volatility_20": "train_rank_ic=-0.0181 低于阈值",
+      "vol_compression_10_40": "train_rank_ic=-0.0046 低于阈值",
+      "volume_surprise_5": "train_rank_ic=0.0029 低于阈值",
+      "turnover_shock_20": "train_rank_ic=0.0004 低于阈值",
+      "liquidity_20": "train_rank_ic=-0.0085 低于阈值",
+      "breakout_distance_20": "train_rank_ic=-0.0192 低于阈值",
+      "close_location_1": "train_rank_ic=-0.0123 低于阈值",
+      "gap_continuation_1": "train_rank_ic=-0.0069 低于阈值",
+      "ma_distance_20": "train_rank_ic=-0.0192 低于阈值"
+    },
+    "oos_failed_factors": {}
+  }
+}

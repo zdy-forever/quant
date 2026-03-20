@@ -1,19 +1,15 @@
 {
-  "strategy": "mean_reversion",
+  "strategy": "compression_breakout",
   "params": {
-    "lookback": 7,
-    "entry_z": 1.0,
-    "exit_z": 0.0,
-    "min_price": 8.0,
-    "min_avg_dollar_volume": 5000000.0,
-    "trend_window": 20,
-    "require_above_trend_ma": false,
-    "require_positive_trend_return": false,
-    "require_rebound_bar": true,
-    "close_location_min": 0.6,
+    "breakout_window": 5,
+    "compression_window": 3,
+    "trend_window": 40,
+    "max_vol_ratio": 0.65,
     "min_volume_surprise": 1.1,
-    "max_gap_down": 0.08,
-    "top_k": 8
+    "close_location_min": 0.6,
+    "min_price": 8.0,
+    "min_avg_dollar_volume": 8000000.0,
+    "top_k": 5
   },
   "train_spec": {
     "symbols": [
@@ -158,7 +154,7 @@
     "objective": "calmar",
     "overwrite_frozen": true,
     "min_trade_count": 30,
-    "min_avg_active_positions": 0.5,
+    "min_avg_active_positions": 1.5,
     "max_avg_turnover": 3.0,
     "backtest": {
       "max_positions": 8,
@@ -174,16 +170,16 @@
     }
   },
   "best_metrics": {
-    "sharpe": 0.00018873384869148735,
-    "sortino": 0.0001554930403989696,
-    "cagr": -0.01424616226195008,
-    "max_dd": -0.4052928094187186,
-    "calmar": -0.03515029610899622,
-    "annual_vol": 0.16838982111095163,
-    "avg_turnover": 0.5456953642384106,
-    "avg_active_positions": 0.5066225165562914,
-    "trade_count": 764.0
+    "sharpe": -0.6891927806010791,
+    "sortino": -0.7764675239109664,
+    "cagr": -0.15325644129252536,
+    "max_dd": -0.6776878845232095,
+    "calmar": -0.22614605453677766,
+    "annual_vol": 0.2093220206457474,
+    "avg_turnover": 1.21242825607064,
+    "avg_active_positions": 1.6788079470198676,
+    "trade_count": 2214.0
   },
-  "frozen_at_utc": "2026-03-20T02:55:24.896008+00:00",
+  "frozen_at_utc": "2026-03-20T01:06:33.845938+00:00",
   "note": "样本外测试和部署阶段严禁直接修改该文件。"
 }

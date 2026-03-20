@@ -1,0 +1,66 @@
+{
+  "generated_at_utc": "2026-03-20T12:20:21Z",
+  "base_model_path": "artifacts\\selected_factors\\low_corr_alpha_model.json",
+  "factors": [
+    "low_volatility_20",
+    "reversal_5",
+    "trend_pullback_20_5"
+  ],
+  "factor_weights": {
+    "low_volatility_20": -0.42694226618377334,
+    "reversal_5": 0.3214609837882461,
+    "trend_pullback_20_5": -0.2515967500279806
+  },
+  "trade_filters": {
+    "min_close_location_1": 0.05,
+    "max_true_range_pct_1": 0.09,
+    "max_volume_surprise_5": 4.0,
+    "max_abs_ma_distance_20": 0.15,
+    "min_liquidity_20": 16.0
+  },
+  "best_risk_candidate": {
+    "risk_overrides": {
+      "gross_exposure": 0.4,
+      "stop_loss_pct": 0.025,
+      "take_profit_pct": 0.08,
+      "trailing_stop_atr_multiple": 1.25,
+      "max_holding_days": 3,
+      "top_n": 10
+    },
+    "train_metrics": {
+      "sharpe": 0.6958363253685587,
+      "sortino": 0.9196040077300769,
+      "cagr": 0.05346669484641864,
+      "max_dd": -0.11186940746499763,
+      "calmar": 0.4779384825352693,
+      "annual_vol": 0.07938525611522101,
+      "avg_turnover": 0.34362913907284776,
+      "avg_active_positions": 7.2701986754966885,
+      "trade_count": 6237.0
+    },
+    "oos_metrics": {
+      "sharpe": 0.18853461046926628,
+      "sortino": 0.2714800818566282,
+      "cagr": 0.012724970257990575,
+      "max_dd": -0.13478148064459017,
+      "calmar": 0.09441185982702673,
+      "annual_vol": 0.0876732144529841,
+      "avg_turnover": 0.3577659574468086,
+      "avg_active_positions": 7.48404255319149,
+      "trade_count": 3255.0
+    },
+    "meets_target_drawdown": true,
+    "score": [
+      true,
+      0.18853461046926628,
+      0.012724970257990575,
+      -0.13478148064459017,
+      0.6958363253685587,
+      -0.11186940746499763
+    ]
+  },
+  "report_files": {
+    "json": "artifacts\\reports\\alpha_combo_risk_search_20260320_122021.json",
+    "markdown": "artifacts\\reports\\alpha_combo_risk_search_20260320_122021.md"
+  }
+}

@@ -17,11 +17,8 @@ import numpy as np
 import pandas as pd
 
 from backtest.engine import BacktestConfig, run_signal_backtest
-from strategy.low_vol_momentum.low_vol_momentum import LowVolMomentumStrategy
 from strategy.mean_reversion.mean_reversion import MeanReversionBollingerStrategy
-from strategy.pullback.pullback import PullbackMomentumStrategy
-from strategy.trend.trend import TrendBreakoutStrategy
-from strategy.turtle.turtle import TurtleBreakoutStrategy
+from strategy.multi_factor_short.multi_factor_short import MultiFactorShortStrategy
 
 
 @dataclass(frozen=True)
@@ -37,11 +34,8 @@ class OptimizationSpec:
 
 def get_strategy_registry() -> Dict[str, Any]:
     return {
-        "trend": TrendBreakoutStrategy(),
         "mean_reversion": MeanReversionBollingerStrategy(),
-        "pullback": PullbackMomentumStrategy(),
-        "turtle": TurtleBreakoutStrategy(),
-        "low_vol_momentum": LowVolMomentumStrategy(),
+        "multi_factor_short": MultiFactorShortStrategy(),
     }
 
 

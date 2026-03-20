@@ -5,6 +5,7 @@
 这个策略更适合“价格短期偏离后回归均值”的环境，核心思路是：
 - 用滚动均值和标准差估计当前价格是否超卖
 - 如果 z-score 很低，就把它视为潜在反弹候选
+- 加上更短周期、更贴近 swing 的过滤条件
 - 每天只保留分数最高的少量标的
 
 如果你以后想让策略更激进或更保守，最常改的是：
@@ -34,28 +35,34 @@ class MeanReversionBollingerStrategy(BaseStrategy):
 
     def default_params(self) -> Dict[str, Any]:
         return {
-            "lookback": 20,
-            "entry_z": 2.0,
-            "exit_z": 0.5,
-            "min_price": 5.0,
-            "min_avg_dollar_volume": 10_000_000.0,
-            "trend_window": 100,
-            "require_above_trend_ma": True,
-            "require_positive_trend_return": True,
+            "lookback": 7,
+            "entry_z": 1.2,
+            "exit_z": 0.0,
+            "min_price": 8.0,
+            "min_avg_dollar_volume": 5_000_000.0,
+            "trend_window": 40,
+            "require_above_trend_ma": False,
+            "require_positive_trend_return": False,
             "require_rebound_bar": True,
-            "top_k": 5,
+            "close_location_min": 0.45,
+            "min_volume_surprise": 0.8,
+            "max_gap_down": 0.10,
+            "top_k": 8,
         }
 
     def param_grid(self) -> Dict[str, Iterable[Any]]:
         return {
-            "lookback": [10, 20, 40],
-            "entry_z": [1.5, 2.0, 2.5],
-            "exit_z": [0.0, 0.5, 1.0],
-            "trend_window": [50, 100, 150],
-            "require_above_trend_ma": [True],
-            "require_positive_trend_return": [True],
-            "require_rebound_bar": [True, False],
-            "top_k": [3, 5],
+            "lookback": [5, 7],
+            "entry_z": [1.0, 1.4],
+            "exit_z": [0.0],
+            "trend_window": [20, 40],
+            "require_above_trend_ma": [False],
+            "require_positive_trend_return": [False],
+            "require_rebound_bar": [True],
+            "close_location_min": [0.45, 0.60],
+            "min_volume_surprise": [0.8, 1.1],
+            "max_gap_down": [0.08, 0.10],
+            "top_k": [5, 8],
         }
 
     def generate(self, ohlcv: pd.DataFrame, params: Dict[str, Any]) -> StrategyResult:
@@ -73,9 +80,14 @@ class MeanReversionBollingerStrategy(BaseStrategy):
         require_above_trend_ma = bool(params.get("require_above_trend_ma", False))
         require_positive_trend_return = bool(params.get("require_positive_trend_return", False))
         require_rebound_bar = bool(params.get("require_rebound_bar", False))
+        close_location_min = float(params.get("close_location_min", 0.60))
+        min_volume_surprise = float(params.get("min_volume_surprise", 1.0))
+        max_gap_down = float(params.get("max_gap_down", 0.08))
         top_k = int(params.get("top_k", 5))
 
         grouped = df.groupby("symbol", group_keys=False)
+        prev_close = grouped["close"].shift(1)
+        bar_range = (df["high"] - df["low"]).replace(0.0, np.nan)
         ma = grouped["close"].transform(lambda s: s.rolling(lookback).mean())
         std = grouped["close"].transform(
             lambda s: s.rolling(lookback).std(ddof=0).replace(0.0, np.nan)
@@ -84,20 +96,27 @@ class MeanReversionBollingerStrategy(BaseStrategy):
         trend_ret = grouped["close"].pct_change(trend_window)
         avg_dollar_volume = (df["close"] * df["volume"])
         avg_dollar_volume = avg_dollar_volume.groupby(df["symbol"]).transform(
-            lambda s: s.rolling(lookback).mean().shift(1)
+            lambda s: s.rolling(20).mean().shift(1)
         )
+        avg_volume = grouped["volume"].transform(lambda s: s.rolling(5).mean().shift(1))
         rebound_bar = grouped["close"].transform(lambda s: s > s.shift(1))
 
         df["z"] = (df["close"] - ma) / std
         df["trend_ma"] = trend_ma
         df["trend_ret"] = trend_ret
         df["avg_dollar_volume"] = avg_dollar_volume
+        df["volume_surprise"] = df["volume"] / avg_volume
         df["rebound_bar"] = rebound_bar
+        df["close_location"] = (df["close"] - df["low"]) / bar_range
+        df["gap_down"] = -(df["open"] / prev_close - 1.0)
 
         entry = (
             (df["z"] < -entry_z)
             & (df["close"] >= min_price)
             & (df["avg_dollar_volume"] >= min_avg_dollar_volume)
+            & (df["volume_surprise"] >= min_volume_surprise)
+            & (df["close_location"] >= close_location_min)
+            & (df["gap_down"].isna() | (df["gap_down"] <= max_gap_down))
         )
         if require_above_trend_ma:
             entry &= (df["trend_ma"].isna()) | (df["close"] >= df["trend_ma"])
@@ -107,8 +126,10 @@ class MeanReversionBollingerStrategy(BaseStrategy):
             entry &= (df["rebound_bar"].isna()) | (df["rebound_bar"])
 
         score = (
-            0.6 * (-df["z"]).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-            + 0.4 * df["trend_ret"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            0.45 * (-df["z"]).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            + 0.20 * df["close_location"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            + 0.20 * df["volume_surprise"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            + 0.15 * df["trend_ret"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
         )
 
         idx = pd.MultiIndex.from_frame(

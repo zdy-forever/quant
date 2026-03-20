@@ -1,0 +1,177 @@
+{
+  "generated_at_utc": "2026-03-20T10:25:29Z",
+  "spec": {
+    "train_start": "2016-01-01",
+    "train_end": "2021-12-31",
+    "oos_start": "2022-01-01",
+    "oos_end": "2024-12-31",
+    "candidate_factors": null,
+    "top_n": 10,
+    "rebalance_every_n_days": 1,
+    "trade_filters": {
+      "min_close_location_1": 0.05,
+      "max_true_range_pct_1": 0.09,
+      "max_volume_surprise_5": 4.0,
+      "max_abs_ma_distance_20": 0.15,
+      "min_liquidity_20": 16.0
+    }
+  },
+  "combo_search_config": {
+    "primary_horizon": 5,
+    "min_train_rank_ic": 0.01,
+    "min_oos_rank_ic": 0.005,
+    "min_train_spread": 0.0,
+    "min_oos_spread": 0.0,
+    "min_train_hit_rate": 0.5,
+    "min_oos_hit_rate": 0.5,
+    "candidate_pool_size": 8,
+    "min_combo_size": 2,
+    "max_combo_size": 4,
+    "max_pairwise_correlation": 0.3,
+    "max_combinations": 12
+  },
+  "best_combination": {
+    "factors": [
+      "low_volatility_20",
+      "reversal_5",
+      "trend_pullback_20_5"
+    ],
+    "factor_details": [
+      {
+        "factor": "low_volatility_20",
+        "category": "volatility",
+        "description": "过去 20 日收益波动率取负号，值越大代表越低波。",
+        "direction": -1,
+        "direction_label": "inverse",
+        "train_rank_ic": 0.01814258987356096,
+        "oos_rank_ic": 0.02067286243673744,
+        "train_spread": 0.0025396709642093525,
+        "oos_spread": 0.0024967599773384887,
+        "train_hit_rate": 0.5525587828492393,
+        "oos_hit_rate": 0.5314591700133868,
+        "selection_score": 0.014996650816488917
+      },
+      {
+        "factor": "reversal_5",
+        "category": "reversal",
+        "description": "过去 5 日收益率取负号，值越大代表短期越超跌。",
+        "direction": 1,
+        "direction_label": "positive",
+        "train_rank_ic": 0.016859532367111355,
+        "oos_rank_ic": 0.011093182350419072,
+        "train_spread": 0.0018754866966080661,
+        "oos_spread": 0.00095478460601542,
+        "train_hit_rate": 0.5152143845089903,
+        "oos_hit_rate": 0.5113788487282463,
+        "selection_score": 0.011291545735418584
+      },
+      {
+        "factor": "trend_pullback_20_5",
+        "category": "momentum",
+        "description": "20 日趋势强度减去近 5 日回撤，用来刻画 trend + pullback。",
+        "direction": -1,
+        "direction_label": "inverse",
+        "train_rank_ic": 0.014230844558867738,
+        "oos_rank_ic": 0.007458531136944601,
+        "train_spread": 0.0008150795498686044,
+        "oos_spread": 0.0007381349974647547,
+        "train_hit_rate": 0.5076071922544951,
+        "oos_hit_rate": 0.5033467202141901,
+        "selection_score": 0.008837514824800628
+      }
+    ],
+    "categories": [
+      "volatility",
+      "reversal",
+      "momentum"
+    ],
+    "factor_weights": {
+      "low_volatility_20": -0.42694226618377334,
+      "reversal_5": 0.3214609837882461,
+      "trend_pullback_20_5": -0.2515967500279806
+    },
+    "avg_abs_corr": 0.01550350218257654,
+    "max_abs_corr": 0.028162083930414403,
+    "research_score": 0.010832694913258573,
+    "train_metrics": {
+      "sharpe": 0.8554269688271822,
+      "sortino": 1.0973942719659528,
+      "cagr": 0.20275148709855917,
+      "max_dd": -0.4256469970190567,
+      "calmar": 0.47633717262900227,
+      "annual_vol": 0.2535797281373481,
+      "avg_turnover": 0.7072847682119205,
+      "avg_active_positions": 9.568211920529802,
+      "trade_count": 474.0
+    },
+    "train_latest_picks": [
+      "ORCL",
+      "BX",
+      "NVDA",
+      "AMD",
+      "ADBE",
+      "OXY",
+      "ABNB",
+      "CRWD",
+      "WFC",
+      "PFE"
+    ],
+    "train_filter_diagnostics": {
+      "config": {
+        "min_close_location_1": 0.05,
+        "max_true_range_pct_1": 0.09,
+        "max_volume_surprise_5": 4.0,
+        "max_abs_ma_distance_20": 0.15,
+        "min_liquidity_20": 16.0
+      },
+      "row_count_before": 189923,
+      "row_count_after": 176108,
+      "blocked_ratio": 0.07274000515998591,
+      "avg_daily_pass_count": 121.37008959338387,
+      "avg_daily_block_count": 9.521019986216402
+    },
+    "oos_metrics": {
+      "sharpe": 0.41939238719048233,
+      "sortino": 0.6143025761861581,
+      "cagr": 0.08000542735833593,
+      "max_dd": -0.3009841085895134,
+      "calmar": 0.2658127956754777,
+      "annual_vol": 0.2730867856337882,
+      "avg_turnover": 0.7449468085106383,
+      "avg_active_positions": 9.956117021276595,
+      "trade_count": 218.0
+    },
+    "oos_latest_picks": [
+      "MU",
+      "CHTR",
+      "CMCSA",
+      "SNPS",
+      "NEM",
+      "FCX",
+      "CI",
+      "ORCL",
+      "ADBE",
+      "CRWD"
+    ],
+    "oos_filter_diagnostics": {
+      "config": {
+        "min_close_location_1": 0.05,
+        "max_true_range_pct_1": 0.09,
+        "max_volume_surprise_5": 4.0,
+        "max_abs_ma_distance_20": 0.15,
+        "min_liquidity_20": 16.0
+      },
+      "row_count_before": 101520,
+      "row_count_after": 94179,
+      "blocked_ratio": 0.07231087470449171,
+      "avg_daily_pass_count": 125.23803191489361,
+      "avg_daily_block_count": 9.761968085106384
+    },
+    "stable_on_train_and_oos": true,
+    "stability_score": 0.4763305986558561
+  },
+  "report_files": {
+    "json": "artifacts\\reports\\alpha_combo_search_20260320_102529.json",
+    "markdown": "artifacts\\reports\\alpha_combo_search_20260320_102529.md"
+  }
+}

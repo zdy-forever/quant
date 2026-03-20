@@ -14,7 +14,7 @@ regime:
 
 position:
   method: "vol_target"
-  max_positions: 10
+  max_positions: 8
   target_vol_annual: 0.15
   vol_lookback: 20
   kelly_fraction: 0.25
@@ -23,50 +23,101 @@ risk:
   max_weight_per_asset: 0.12
   max_gross_exposure: 1.0
   max_drawdown: 0.25
-  stop_loss_pct: 0.08
-  take_profit_pct: 0.25
+  stop_loss_pct: 0.04
+  take_profit_pct: 0.08
   slippage_bps: 5.0
   commission_bps: 0.0
 
 backtest:
-  max_positions: 10
+  max_positions: 8
   gross_exposure: 1.0
   rebalance_every_n_days: 1
   slippage_bps: 5.0
   commission_bps: 0.0
-  stop_loss_pct: 0.08
-  take_profit_pct: 0.25
-  trailing_stop_atr_multiple: 3.0
-  atr_window: 20
-  max_holding_days: 120
+  stop_loss_pct: 0.04
+  take_profit_pct: 0.08
+  trailing_stop_atr_multiple: 1.5
+  atr_window: 14
+  max_holding_days: 3
 
 optimizer:
-  min_trade_count: 8
-  min_avg_active_positions: 1.0
-  max_avg_turnover: 1.5
+  min_trade_count: 30
+  min_avg_active_positions: 0.5
+  max_avg_turnover: 3.0
 
 strategy_mix:
   lookback_days: 60
   max_total_exposure: 1.0
   min_strategy_weight: 0.05
   high_vol_haircut: 0.35
-  trend_strategies:
-    - trend
-    - turtle
-    - pullback
-    - low_vol_momentum
+  trend_strategies: []
   range_strategies:
     - mean_reversion
   defensive_strategies:
-    - low_vol_momentum
+    - multi_factor_short
 
 alpha_lab:
   forward_days:
     - 1
+    - 2
+    - 3
     - 5
-    - 10
-    - 20
   quantiles: 5
   top_n: 10
-  min_ic: 0.02
-  min_rank_ic: 0.03
+  min_ic: 0.01
+  min_rank_ic: 0.01
+
+universe:
+  min_price: 8.0
+  min_avg_dollar_volume: 8000000.0
+  min_history_days: 60
+
+standardize:
+  method: "rank"
+  winsorize_lower: 0.02
+  winsorize_upper: 0.98
+
+factor_research:
+  forward_days:
+    - 1
+    - 2
+    - 3
+    - 5
+  quantiles: 5
+  primary_horizon: 5
+  min_cross_section: 20
+
+factor_selection:
+  primary_horizon: 5
+  min_train_rank_ic: 0.01
+  min_oos_rank_ic: 0.005
+  min_train_spread: 0.0
+  min_oos_spread: 0.0
+  min_train_hit_rate: 0.50
+  min_oos_hit_rate: 0.50
+  max_factors: 4
+
+factor_combo_search:
+  primary_horizon: 5
+  min_train_rank_ic: 0.01
+  min_oos_rank_ic: 0.005
+  min_train_spread: 0.0
+  min_oos_spread: 0.0
+  min_train_hit_rate: 0.50
+  min_oos_hit_rate: 0.50
+  candidate_pool_size: 8
+  min_combo_size: 2
+  max_combo_size: 4
+  max_pairwise_correlation: 0.30
+  max_combinations: 12
+
+alpha_trade_filters:
+  min_close_location_1: 0.05
+  max_true_range_pct_1: 0.09
+  max_volume_surprise_5: 4.0
+  max_abs_ma_distance_20: 0.15
+  min_liquidity_20: 16.0
+
+composite_model:
+  top_n: 10
+  rebalance_every_n_days: 1
