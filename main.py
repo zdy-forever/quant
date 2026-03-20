@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from pipelines.run_alpha_combo_search import AlphaComboSearchSpec, run_alpha_combo_search
 from pipelines.run_alpha_combo_walk_forward import AlphaComboWalkForwardSpec, run_alpha_combo_walk_forward
+from pipelines.run_alpha_combo_regime_switch import AlphaComboRegimeSwitchSpec, run_alpha_combo_regime_switch
 from pipelines.run_alpha_combo_risk_search import AlphaComboRiskSearchSpec, run_alpha_combo_risk_search
 from pipelines.run_composite_portfolio import FactorPortfolioSpec, run_composite_portfolio
 from pipelines.run_factor_pipeline import FactorPipelineSpec, run_factor_pipeline
@@ -969,6 +970,8 @@ def cmd_alpha_combo_risk_search(args: argparse.Namespace) -> None:
             train_end=args.train_end,
             oos_start=args.oos_start,
             oos_end=args.oos_end,
+            model_path=args.model_path,
+            output_model_path=args.output_model_path,
             target_max_dd=args.target_max_dd,
             trade_filters=trade_filters,
             gross_exposure_grid=args.gross_exposure_grid,
@@ -976,6 +979,10 @@ def cmd_alpha_combo_risk_search(args: argparse.Namespace) -> None:
             stop_loss_grid=args.stop_loss_grid,
             trailing_stop_grid=args.trailing_stop_grid,
             max_holding_days_grid=args.max_holding_days_grid,
+            portfolio_soft_dd_grid=args.portfolio_soft_dd_grid,
+            portfolio_deleverage_grid=args.portfolio_deleverage_grid,
+            portfolio_hard_dd_grid=args.portfolio_hard_dd_grid,
+            portfolio_cooldown_days_grid=args.portfolio_cooldown_days_grid,
         ),
         universe_cfg,
         standardize_cfg,
@@ -984,6 +991,65 @@ def cmd_alpha_combo_risk_search(args: argparse.Namespace) -> None:
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     _notify_research("alpha-combo-risk-search", result)
+
+
+def cmd_alpha_combo_regime_switch(args: argparse.Namespace) -> None:
+    from backtest.engine import BacktestConfig
+    from regime.detection import RegimeConfig
+
+    runtime = load_runtime_config()
+    data_client, _ = get_alpaca_clients()
+    symbols = load_symbols()
+    regime_cfg = RegimeConfig(**(runtime.get("regime", {}) or {}))
+    fetch_start = min(args.train_start, args.oos_start)
+    fetch_end = max(args.train_end, args.oos_end)
+    fetch_symbols = sorted(set(symbols + [regime_cfg.symbol_for_regime]))
+    full_ohlcv = fetch_daily_ohlcv(
+        data_client,
+        fetch_symbols,
+        fetch_start,
+        fetch_end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    trade_ohlcv = full_ohlcv[full_ohlcv["symbol"].isin(set(symbols))].copy()
+
+    backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    universe_cfg, standardize_cfg, test_cfg, _ = _load_factor_runtime_components(runtime)
+    combo_cfg = FactorComboSearchConfig(**_load_factor_combo_runtime(runtime, test_cfg))
+    trade_filters = _load_alpha_trade_filters_runtime(runtime)
+    top_n, rebalance_every_n_days = _load_composite_runtime(runtime, args)
+
+    result = run_alpha_combo_regime_switch(
+        trade_ohlcv,
+        full_ohlcv,
+        AlphaComboRegimeSwitchSpec(
+            train_start=args.train_start,
+            train_end=args.train_end,
+            oos_start=args.oos_start,
+            oos_end=args.oos_end,
+            aggressive_model_path=args.aggressive_model_path,
+            conservative_model_path=args.conservative_model_path,
+            candidate_factors=args.candidate_factors,
+            top_n=top_n,
+            rebalance_every_n_days=rebalance_every_n_days,
+            trade_filters=trade_filters,
+            max_drawdown_gap=args.max_drawdown_gap,
+            target_max_dd=args.target_max_dd,
+            gross_exposure_grid=args.gross_exposure_grid,
+            portfolio_soft_dd_grid=args.portfolio_soft_dd_grid,
+            portfolio_deleverage_grid=args.portfolio_deleverage_grid,
+            portfolio_hard_dd_grid=args.portfolio_hard_dd_grid,
+            portfolio_cooldown_days_grid=args.portfolio_cooldown_days_grid,
+        ),
+        universe_cfg,
+        standardize_cfg,
+        test_cfg,
+        combo_cfg,
+        backtest_cfg,
+        regime_cfg,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _notify_research("alpha-combo-regime-switch", result)
 
 
 def cmd_pipeline(args: argparse.Namespace) -> None:
@@ -1317,13 +1383,47 @@ def build_parser() -> argparse.ArgumentParser:
     combo_risk_parser.add_argument("--train-end", required=True)
     combo_risk_parser.add_argument("--oos-start", required=True)
     combo_risk_parser.add_argument("--oos-end", required=True)
+    combo_risk_parser.add_argument("--model-path", default=os.path.join("artifacts", "selected_factors", "low_corr_alpha_model.json"))
+    combo_risk_parser.add_argument("--output-model-path", default=None)
     combo_risk_parser.add_argument("--target-max-dd", type=float, default=0.15)
     combo_risk_parser.add_argument("--gross-exposure-grid", nargs="+", type=float, default=None)
     combo_risk_parser.add_argument("--top-n-grid", nargs="+", type=int, default=None)
     combo_risk_parser.add_argument("--stop-loss-grid", nargs="+", type=float, default=None)
     combo_risk_parser.add_argument("--trailing-stop-grid", nargs="+", type=float, default=None)
     combo_risk_parser.add_argument("--max-holding-days-grid", nargs="+", type=int, default=None)
+    combo_risk_parser.add_argument("--portfolio-soft-dd-grid", nargs="+", type=float, default=None)
+    combo_risk_parser.add_argument("--portfolio-deleverage-grid", nargs="+", type=float, default=None)
+    combo_risk_parser.add_argument("--portfolio-hard-dd-grid", nargs="+", type=float, default=None)
+    combo_risk_parser.add_argument("--portfolio-cooldown-days-grid", nargs="+", type=int, default=None)
     combo_risk_parser.set_defaults(fn=cmd_alpha_combo_risk_search)
+
+    combo_regime_parser = subparsers.add_parser(
+        "alpha-combo-regime-switch",
+        help="Compare aggressive/defensive alpha combos by regime and search regime-specific switching models",
+    )
+    combo_regime_parser.add_argument("--train-start", required=True)
+    combo_regime_parser.add_argument("--train-end", required=True)
+    combo_regime_parser.add_argument("--oos-start", required=True)
+    combo_regime_parser.add_argument("--oos-end", required=True)
+    combo_regime_parser.add_argument("--candidate-factors", nargs="+", default=None)
+    combo_regime_parser.add_argument("--top-n", type=int, default=None)
+    combo_regime_parser.add_argument("--rebalance-every-n-days", type=int, default=None)
+    combo_regime_parser.add_argument(
+        "--aggressive-model-path",
+        default=os.path.join("artifacts", "selected_factors", "low_corr_alpha_model.json"),
+    )
+    combo_regime_parser.add_argument(
+        "--conservative-model-path",
+        default=os.path.join("artifacts", "selected_factors", "low_corr_alpha_risk_model.json"),
+    )
+    combo_regime_parser.add_argument("--max-drawdown-gap", type=float, default=0.05)
+    combo_regime_parser.add_argument("--target-max-dd", type=float, default=0.15)
+    combo_regime_parser.add_argument("--gross-exposure-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--portfolio-soft-dd-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--portfolio-deleverage-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--portfolio-hard-dd-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--portfolio-cooldown-days-grid", nargs="+", type=int, default=None)
+    combo_regime_parser.set_defaults(fn=cmd_alpha_combo_regime_switch)
 
     pipeline_parser = subparsers.add_parser(
         "pipeline",

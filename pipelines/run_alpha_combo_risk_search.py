@@ -36,6 +36,7 @@ class AlphaComboRiskSearchSpec:
     oos_start: str
     oos_end: str
     model_path: str = os.path.join("artifacts", "selected_factors", "low_corr_alpha_model.json")
+    output_model_path: str | None = None
     target_max_dd: float = 0.15
     trade_filters: Dict[str, float] | None = None
     gross_exposure_grid: List[float] | None = None
@@ -43,11 +44,38 @@ class AlphaComboRiskSearchSpec:
     stop_loss_grid: List[float] | None = None
     trailing_stop_grid: List[float] | None = None
     max_holding_days_grid: List[int] | None = None
+    portfolio_soft_dd_grid: List[float] | None = None
+    portfolio_deleverage_grid: List[float] | None = None
+    portfolio_hard_dd_grid: List[float] | None = None
+    portfolio_cooldown_days_grid: List[int] | None = None
 
 
 def _load_model(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def _extract_model_inputs(model: Dict[str, Any], backtest_cfg: BacktestConfig) -> Dict[str, Any]:
+    if "best_combination" in model:
+        best_combo = model["best_combination"]
+        return {
+            "selected_factors": list(best_combo["factors"]),
+            "factor_weights": {str(k): float(v) for k, v in best_combo["factor_weights"].items()},
+            "trade_filters": model.get("spec", {}).get("trade_filters", {}) or {},
+            "base_overrides": {},
+            "base_top_n": int(model.get("spec", {}).get("top_n", backtest_cfg.max_positions)),
+        }
+
+    best_risk = model.get("best_risk_candidate", {}) or {}
+    base_overrides = {str(k): v for k, v in (best_risk.get("risk_overrides", {}) or {}).items()}
+    base_top_n = int(base_overrides.pop("top_n", backtest_cfg.max_positions))
+    return {
+        "selected_factors": list(model.get("factors", [])),
+        "factor_weights": {str(k): float(v) for k, v in (model.get("factor_weights", {}) or {}).items()},
+        "trade_filters": model.get("trade_filters", {}) or {},
+        "base_overrides": base_overrides,
+        "base_top_n": base_top_n,
+    }
 
 
 def _metric_value(metrics: Dict[str, Any], name: str) -> float:
@@ -137,9 +165,12 @@ def run_alpha_combo_risk_search(
     os.makedirs(SELECTED_DIR, exist_ok=True)
 
     model = _load_model(spec.model_path)
-    best_combo = model["best_combination"]
-    selected_factors = list(best_combo["factors"])
-    factor_weights = {str(k): float(v) for k, v in best_combo["factor_weights"].items()}
+    extracted = _extract_model_inputs(model, backtest_cfg)
+    selected_factors = extracted["selected_factors"]
+    factor_weights = extracted["factor_weights"]
+    resolved_trade_filters = spec.trade_filters if spec.trade_filters is not None else extracted["trade_filters"]
+    base_overrides = extracted["base_overrides"]
+    base_top_n = int(extracted["base_top_n"])
 
     research = run_factor_research(
         ohlcv,
@@ -155,26 +186,52 @@ def run_alpha_combo_risk_search(
         test_cfg,
     )
 
-    gross_grid = spec.gross_exposure_grid or [0.35, 0.50, 0.65]
-    top_n_grid = spec.top_n_grid or [6, 8, 10]
-    stop_grid = spec.stop_loss_grid or [0.02, 0.03, 0.04]
-    trailing_grid = spec.trailing_stop_grid or [0.75, 1.0, 1.25]
-    holding_grid = spec.max_holding_days_grid or [2, 3]
+    gross_grid = spec.gross_exposure_grid or [float(base_overrides.get("gross_exposure", backtest_cfg.gross_exposure))]
+    top_n_grid = spec.top_n_grid or [int(base_top_n)]
+    stop_grid = spec.stop_loss_grid or [float(base_overrides.get("stop_loss_pct", backtest_cfg.stop_loss_pct))]
+    trailing_grid = spec.trailing_stop_grid or [
+        float(base_overrides.get("trailing_stop_atr_multiple", backtest_cfg.trailing_stop_atr_multiple))
+    ]
+    holding_grid = spec.max_holding_days_grid or [int(base_overrides.get("max_holding_days", backtest_cfg.max_holding_days))]
+    soft_dd_grid = spec.portfolio_soft_dd_grid or [0.08, 0.10]
+    deleverage_grid = spec.portfolio_deleverage_grid or [0.50, 0.65]
+    hard_dd_grid = spec.portfolio_hard_dd_grid or [0.15, 0.18]
+    cooldown_grid = spec.portfolio_cooldown_days_grid or [5]
 
     results: List[Dict[str, Any]] = []
-    for gross_exposure, top_n, stop_loss_pct, trailing_stop_atr_multiple, max_holding_days in itertools.product(
+    for (
+        gross_exposure,
+        top_n,
+        stop_loss_pct,
+        trailing_stop_atr_multiple,
+        max_holding_days,
+        portfolio_soft_dd_limit,
+        portfolio_deleverage_ratio,
+        portfolio_hard_dd_limit,
+        portfolio_kill_cooldown_days,
+    ) in itertools.product(
         gross_grid,
         top_n_grid,
         stop_grid,
         trailing_grid,
         holding_grid,
+        soft_dd_grid,
+        deleverage_grid,
+        hard_dd_grid,
+        cooldown_grid,
     ):
+        if float(portfolio_hard_dd_limit) <= float(portfolio_soft_dd_limit):
+            continue
         risk_overrides = {
             "gross_exposure": float(gross_exposure),
             "stop_loss_pct": float(stop_loss_pct),
-            "take_profit_pct": backtest_cfg.take_profit_pct,
+            "take_profit_pct": float(base_overrides.get("take_profit_pct", backtest_cfg.take_profit_pct)),
             "trailing_stop_atr_multiple": float(trailing_stop_atr_multiple),
             "max_holding_days": int(max_holding_days),
+            "portfolio_soft_dd_limit": float(portfolio_soft_dd_limit),
+            "portfolio_deleverage_ratio": float(portfolio_deleverage_ratio),
+            "portfolio_hard_dd_limit": float(portfolio_hard_dd_limit),
+            "portfolio_kill_cooldown_days": int(portfolio_kill_cooldown_days),
         }
 
         train_result = run_composite_portfolio(
@@ -187,7 +244,7 @@ def run_alpha_combo_risk_search(
                 top_n=int(top_n),
                 rebalance_every_n_days=backtest_cfg.rebalance_every_n_days,
                 factor_weights=factor_weights,
-                trade_filters=spec.trade_filters,
+                trade_filters=resolved_trade_filters,
                 backtest_overrides=risk_overrides,
             ),
             backtest_cfg,
@@ -203,7 +260,7 @@ def run_alpha_combo_risk_search(
                 top_n=int(top_n),
                 rebalance_every_n_days=backtest_cfg.rebalance_every_n_days,
                 factor_weights=factor_weights,
-                trade_filters=spec.trade_filters,
+                trade_filters=resolved_trade_filters,
                 backtest_overrides=risk_overrides,
             ),
             backtest_cfg,
@@ -230,12 +287,26 @@ def run_alpha_combo_risk_search(
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     json_path = os.path.join(REPORT_DIR, f"alpha_combo_risk_search_{stamp}.json")
     md_path = os.path.join(REPORT_DIR, f"alpha_combo_risk_search_{stamp}.md")
-    frozen_path = os.path.join(SELECTED_DIR, "low_corr_alpha_risk_model.json")
+    if spec.output_model_path:
+        frozen_path = spec.output_model_path
+    elif os.path.basename(spec.model_path) == "low_corr_alpha_risk_model.json":
+        frozen_path = os.path.join(SELECTED_DIR, "low_corr_alpha_overlay_model.json")
+    else:
+        frozen_path = os.path.join(SELECTED_DIR, "low_corr_alpha_risk_model.json")
 
     summary = {
         "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "spec": asdict(spec),
-        "model": model,
+        "model": {
+            **model,
+            "best_combination": model.get(
+                "best_combination",
+                {
+                    "factors": selected_factors,
+                    "factor_weights": factor_weights,
+                },
+            ),
+        },
         "candidate_count": len(results),
         "best_candidate": best_candidate,
         "top_candidates": ranked[:10],
@@ -249,12 +320,13 @@ def run_alpha_combo_risk_search(
         json.dump(summary, handle, ensure_ascii=False, indent=2)
     _write_markdown_report(summary, md_path)
 
+    os.makedirs(os.path.dirname(frozen_path), exist_ok=True)
     frozen_payload = {
         "generated_at_utc": summary["generated_at_utc"],
         "base_model_path": spec.model_path,
         "factors": selected_factors,
         "factor_weights": factor_weights,
-        "trade_filters": spec.trade_filters or {},
+        "trade_filters": resolved_trade_filters or {},
         "best_risk_candidate": best_candidate,
         "report_files": summary["report_files"],
     }

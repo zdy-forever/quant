@@ -32,6 +32,10 @@ class BacktestConfig:
     trailing_stop_atr_multiple: float = 3.0
     atr_window: int = 20
     max_holding_days: int = 120
+    portfolio_soft_dd_limit: float = 0.0
+    portfolio_deleverage_ratio: float = 1.0
+    portfolio_hard_dd_limit: float = 0.0
+    portfolio_kill_cooldown_days: int = 0
 
 
 def _prepare_ohlcv(ohlcv: pd.DataFrame) -> pd.DataFrame:
@@ -209,10 +213,18 @@ def run_weight_backtest(
     equity_values = [equity]
     turnover_values = [0.0]
     active_values = [0.0]
+    drawdown_values = [0.0]
+    gross_cap_values = [float(cfg.gross_exposure)]
 
     current_weights = pd.Series(0.0, index=close_px.columns)
+    executed_weight_rows = [current_weights.copy()]
     current_states: Dict[str, Dict[str, Any]] = {}
     trade_count = 0
+    peak_equity = equity
+    hard_kill_count = 0
+    soft_deleverage_days = 0
+    cooldown_days_applied = 0
+    kill_cooldown_remaining = 0
 
     for idx in range(1, len(close_px.index)):
         prev_ts = close_px.index[idx - 1]
@@ -222,6 +234,8 @@ def run_weight_backtest(
         curr_close = close_px.loc[curr_ts]
         close_ret = (curr_close / prev_close - 1.0).replace([np.inf, -np.inf], 0.0).fillna(0.0)
         equity *= 1.0 + float((current_weights * close_ret).sum())
+        peak_equity = max(peak_equity, equity)
+        current_drawdown = equity / max(peak_equity, 1e-12) - 1.0
 
         next_weights = weights.loc[curr_ts].copy()
         if cfg.rebalance_every_n_days > 1 and idx % cfg.rebalance_every_n_days != 0:
@@ -258,9 +272,27 @@ def run_weight_backtest(
                 state["last_close"] = close_value
 
         next_weights = next_weights.where(curr_close.notna(), 0.0).fillna(0.0)
+        allowed_gross = float(cfg.gross_exposure)
+        hard_limit = max(0.0, float(cfg.portfolio_hard_dd_limit))
+        soft_limit = max(0.0, float(cfg.portfolio_soft_dd_limit))
+        deleverage_ratio = min(max(float(cfg.portfolio_deleverage_ratio), 0.0), 1.0)
+
+        if kill_cooldown_remaining > 0:
+            next_weights = next_weights * 0.0
+            kill_cooldown_remaining -= 1
+            cooldown_days_applied += 1
+        elif hard_limit > 0.0 and current_drawdown <= -hard_limit:
+            next_weights = next_weights * 0.0
+            hard_kill_count += 1
+            kill_cooldown_remaining = max(int(cfg.portfolio_kill_cooldown_days), 0)
+        elif soft_limit > 0.0 and deleverage_ratio < 1.0 and current_drawdown <= -soft_limit:
+            allowed_gross = float(cfg.gross_exposure) * deleverage_ratio
+
         gross = float(next_weights.abs().sum())
-        if gross > cfg.gross_exposure and gross > 1e-12:
-            next_weights = next_weights * (cfg.gross_exposure / gross)
+        if gross > allowed_gross and gross > 1e-12:
+            next_weights = next_weights * (allowed_gross / gross)
+            if allowed_gross < float(cfg.gross_exposure):
+                soft_deleverage_days += 1
 
         turnover = float((next_weights - current_weights).abs().sum())
         equity *= max(0.0, 1.0 - turnover * cost_ratio)
@@ -279,10 +311,16 @@ def run_weight_backtest(
         equity_values.append(equity)
         turnover_values.append(turnover)
         active_values.append(float((current_weights > 0).sum()))
+        drawdown_values.append(float(current_drawdown))
+        gross_cap_values.append(float(allowed_gross))
+        executed_weight_rows.append(current_weights.copy())
 
     equity_curve = pd.Series(equity_values, index=close_px.index, name="equity")
     turnover_series = pd.Series(turnover_values, index=close_px.index, name="turnover")
     active_series = pd.Series(active_values, index=close_px.index, name="active_positions")
+    drawdown_series = pd.Series(drawdown_values, index=close_px.index, name="portfolio_drawdown")
+    gross_cap_series = pd.Series(gross_cap_values, index=close_px.index, name="gross_exposure_cap")
+    executed_weights = pd.DataFrame(executed_weight_rows, index=close_px.index).reindex(columns=close_px.columns).fillna(0.0)
 
     return {
         "config": asdict(cfg),
@@ -290,6 +328,14 @@ def run_weight_backtest(
         "turnover": turnover_series,
         "active_positions": active_series,
         "daily_weights": weights,
+        "executed_weights": executed_weights,
+        "portfolio_drawdown": drawdown_series,
+        "gross_exposure_cap": gross_cap_series,
+        "risk_overlay": {
+            "soft_deleverage_days": float(soft_deleverage_days),
+            "hard_kill_count": float(hard_kill_count),
+            "cooldown_days_applied": float(cooldown_days_applied),
+        },
         "metrics": _compute_metrics(equity_curve, turnover_series, active_series, trade_count),
     }
 

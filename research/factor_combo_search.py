@@ -99,6 +99,17 @@ def select_oriented_factor_pool(
 
     for factor_name in train_result["factor_names"]:
         summary = _oriented_factor_summary(factor_name, train_result, oos_result, factor_definitions, cfg)
+        core_values = [
+            summary["train_rank_ic"],
+            summary["oos_rank_ic"],
+            summary["train_spread"],
+            summary["oos_spread"],
+            summary["train_hit_rate"],
+            summary["oos_hit_rate"],
+        ]
+        if not np.isfinite(core_values).all():
+            dropped[factor_name] = "train/oos regime 样本不足，核心统计为 NaN"
+            continue
 
         if summary["train_rank_ic"] < cfg.min_train_rank_ic:
             dropped[factor_name] = f"oriented_train_rank_ic={summary['train_rank_ic']:.4f} 低于阈值"
@@ -162,6 +173,10 @@ def select_train_only_oriented_factor_pool(
             "oos_hit_rate": np.nan,
             "selection_score": float(0.70 * train_rank_ic + 0.20 * train_spread + 0.10 * (train_hit_rate - 0.50)),
         }
+        core_values = [train_rank_ic, train_spread, train_hit_rate]
+        if not np.isfinite(core_values).all():
+            dropped[factor_name] = "train regime 样本不足，核心统计为 NaN"
+            continue
 
         if train_rank_ic < cfg.min_train_rank_ic:
             dropped[factor_name] = f"train_rank_ic={train_rank_ic:.4f} 低于阈值"

@@ -127,6 +127,7 @@ def _research_subject(command_name: str) -> str:
         "alpha-combo-search": "低相关Alpha组合报告",
         "alpha-combo-walk-forward": "低相关Alpha滚动验证",
         "alpha-combo-risk-search": "低相关Alpha风控搜索",
+        "alpha-combo-regime-switch": "低相关Alpha状态切换研究",
         "deploy": "Alpaca 模拟盘操作",
     }
     title = mapping.get(command_name, "回测研究报告")
@@ -323,7 +324,7 @@ def _generic_research_body(command_name: str, payload: Dict[str, Any]) -> str:
                 "这是一封自动通知邮件，由财政小助手mina发出。",
             ]
         )
-    elif command_name in {"alpha-combo-search", "alpha-combo-walk-forward", "alpha-combo-risk-search"}:
+    elif command_name in {"alpha-combo-search", "alpha-combo-walk-forward", "alpha-combo-risk-search", "alpha-combo-regime-switch"}:
         lines.extend(
             [
                 "",

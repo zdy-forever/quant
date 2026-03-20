@@ -1,5 +1,111 @@
 # Changes Log
 
+## 2026-03-21 1.0.18（组合级风控 + Regime 切换因子）
+
+### 组合级风控不再继续砍单票止损
+
+- 更新了 [backtest/engine.py](backtest/engine.py)
+- 组合回测引擎新增了组合级风险闸门：
+  - `portfolio_soft_dd_limit`
+  - `portfolio_deleverage_ratio`
+  - `portfolio_hard_dd_limit`
+  - `portfolio_kill_cooldown_days`
+- 逻辑改成：
+  - 先保留当前单票止损参数
+  - 再额外在组合层做“回撤触发降杠杆 / 熔断冷却”
+- 更新了 [config/runtime.yaml](config/runtime.yaml)
+  - 把这些组合级风控参数暴露到运行期配置里
+
+### 风控搜索改成“保留当前参数 + 叠加组合级闸门”
+
+- 更新了 [pipelines/run_alpha_combo_risk_search.py](pipelines/run_alpha_combo_risk_search.py)
+- 更新了 [main.py](main.py)
+- `alpha-combo-risk-search` 现在支持：
+  - `--model-path`
+  - `--output-model-path`
+  - `--portfolio-soft-dd-grid`
+  - `--portfolio-deleverage-grid`
+  - `--portfolio-hard-dd-grid`
+  - `--portfolio-cooldown-days-grid`
+- 默认行为也改了：
+  - 会优先保留当前模型已有的 `top_n / stop_loss / trailing_stop / max_holding_days`
+  - 不再默认继续把单票止损越砍越紧
+  - 主要搜索组合级降杠杆 / 熔断参数
+
+### 新的 Overlay 保守版结果
+
+- 新报告：
+  - [artifacts/reports/alpha_combo_risk_search_20260320_135146.json](artifacts/reports/alpha_combo_risk_search_20260320_135146.json)
+  - [artifacts/reports/alpha_combo_risk_search_20260320_135146.md](artifacts/reports/alpha_combo_risk_search_20260320_135146.md)
+- 新冻结文件：
+  - [artifacts/selected_factors/low_corr_alpha_overlay_model.json](artifacts/selected_factors/low_corr_alpha_overlay_model.json)
+- 这版仍然保留原先的：
+  - 因子组合：`-low_volatility_20 + reversal_5 + -trend_pullback_20_5`
+  - 单票参数：`gross_exposure=0.40 / stop_loss_pct=2.5% / trailing_stop=1.25 ATR / max_holding_days=3 / top_n=10`
+- 额外叠加的组合级风控是：
+  - `portfolio_soft_dd_limit = 10%`
+  - `portfolio_deleverage_ratio = 0.65`
+  - `portfolio_hard_dd_limit = 15%`
+  - `portfolio_kill_cooldown_days = 5`
+- 结果变化：
+  - 旧低回撤版 OOS：`Sharpe 0.189 / CAGR 1.27% / MaxDD -13.48%`
+  - 新 overlay 版 OOS：`Sharpe 0.172 / CAGR 1.11% / MaxDD -12.76%`
+- 结论：
+  - 收益略降
+  - 但回撤确实继续被压下来了
+  - 而且不是靠进一步砍单票止损做到的
+
+### Regime 切换主线
+
+- 新增 [pipelines/run_alpha_combo_regime_switch.py](pipelines/run_alpha_combo_regime_switch.py)
+- 更新了 [main.py](main.py)
+- 新增命令：
+  - `alpha-combo-regime-switch`
+- 新增测试：
+  - [tests/test_portfolio_risk_overlay.py](tests/test_portfolio_risk_overlay.py)
+  - 已验证组合级降杠杆与熔断冷却行为生效
+
+### Regime 研究结果
+
+- 轻量 frozen-model 对比报告：
+  - [artifacts/reports/alpha_combo_regime_compare_20260320_140006.json](artifacts/reports/alpha_combo_regime_compare_20260320_140006.json)
+  - [artifacts/reports/alpha_combo_regime_compare_20260320_140006.md](artifacts/reports/alpha_combo_regime_compare_20260320_140006.md)
+- 更完整的 regime-switch 报告：
+  - [artifacts/reports/alpha_combo_regime_switch_20260320_140012.json](artifacts/reports/alpha_combo_regime_switch_20260320_140012.json)
+  - [artifacts/reports/alpha_combo_regime_switch_20260320_140012.md](artifacts/reports/alpha_combo_regime_switch_20260320_140012.md)
+- 当前冻结的切换模型：
+  - [artifacts/selected_factors/regime_switch_alpha_model.json](artifacts/selected_factors/regime_switch_alpha_model.json)
+
+### 当前切换结论
+
+- `range_low_vol`
+  - 找到了新的 regime 组合：`-low_volatility_20 + -momentum_60`
+  - 激进版 OOS：`Sharpe 0.459 / CAGR 3.73% / MaxDD -20.88%`
+  - 保守版 OOS：`Sharpe 0.478 / CAGR 2.83% / MaxDD -14.48%`
+  - 由于激进版回撤超过保守版 `5%` 底线，当前选 `conservative`
+- `trend_low_vol`
+  - 新候选因子太弱，最终回退到当前冻结主组合
+  - 激进版 OOS：`Sharpe 0.173 / CAGR 1.44% / MaxDD -28.96%`
+  - 保守版 OOS：`Sharpe -0.007 / CAGR -0.39% / MaxDD -13.14%`
+  - 虽然收益被压低，但激进版回撤超出底线太多，当前仍选 `conservative`
+- `trend_high_vol`
+  - OOS 样本较少，回退到当前冻结主组合
+  - 激进版 OOS：`Sharpe 0.094 / CAGR 0.30% / MaxDD -5.21%`
+  - 保守版 OOS：`Sharpe 0.185 / CAGR 0.29% / MaxDD -2.00%`
+  - 因为激进版只比保守版多 `3.21%` 回撤，仍在 `5%` 底线内，当前选 `aggressive`
+- `range_high_vol`
+  - OOS 样本太少，当前不强行生成新组合
+  - 先沿用冻结模型结果，视作 `fallback`
+
+### 过拟合控制
+
+- 这轮明确收紧了搜索空间，避免为了报表好看乱扫参：
+  - regime 搜索只允许很小的候选池和组合数
+  - 组合级风控只搜索少量可解释阈值
+  - 某个 regime 样本太薄时直接 `fallback`
+  - 选择规则固定成“激进版回撤是否超过保守版 + 5%”
+- 这意味着当前结论更像“先得到可重复的切换规则”，而不是“把历史最好看的数字调出来”
+
 ## 2026-03-21 1.0.17（清理重构后无关文件）
 
 ### 项目结构清理
@@ -580,61 +686,6 @@
 - 汇总 Markdown：
   - [artifacts/reports/pipeline_20260319_143550.md](artifacts/reports/pipeline_20260319_143550.md)
 
-## 2026-03-19  1.0.7
-
-
-### Alpaca 免费版延迟保护
-
-- 检查后确认原来的 `deploy` 流程没有显式处理免费版约 15 分钟延迟的问题
-- 已在 [main.py](main.py) 新增保护逻辑：如果当前还是美东当日且未到 `16:15 ET`，则自动丢弃当天未确认完成的日线 bar
-- 这样部署时默认只基于上一个已完成交易日的日线做决策，避免把延迟中的“今天日线”误当成最终数据
-
-### 量化稳健性改造（本轮）
-
-- 在本机为项目创建了本地 `uv` 虚拟环境：`.venv`
-- 安装并补齐了运行依赖，额外补装 `pytz`
-- 跑通测试，当前 `pytest` 结果为 `4 passed`
-- 先完成了一轮基线回测：`train -> test -> walk-forward`
-
-### 策略层改动
-
-#### trend
-
-- 新增长期趋势过滤参数：`trend_filter_window`
-- 新增波动过滤参数：`volatility_window`、`max_daily_volatility`
-- 目标是减少高波动环境下的假突破，优先保留更平滑的趋势信号
-
-#### mean_reversion
-
-- 新增流动性过滤：`min_avg_dollar_volume`
-- 新增长期趋势过滤：`trend_window`
-- 新增三个稳健性开关：
-  - `require_above_trend_ma`
-  - `require_positive_trend_return`
-  - `require_rebound_bar`
-- 核心目的：避免在明显下跌趋势里反复抄底，把均值回归收缩成“顺大趋势里的短线回撤反弹”
-
-### 训练评分修正
-
-- 修正了 `calmar` 目标的一个退化问题：
-  - 以前参数搜索会偏向“几乎不交易”的组合，因为回撤接近 0，导致 `calmar` 虚高
-- 现在做了两层约束：
-  - `calmar` 的回撤分母设置最小有效值 `0.02`
-  - 新增信号活跃度过滤，过于低频的参数组合会被跳过
-- 这样能避免把“躺平不交易”误判成“稳健策略”
-
-### 当前结论（阶段性）
-
-- `trend` 仍然是目前更有交易价值的单策略
-- `mean_reversion` 在加了稳健过滤后，回撤明显收敛，但收益也被压得很低，暂时更像辅助/候补策略，而不是主策略
-- 仅靠当前这套日线股票逻辑，想把“单策略最大回撤”长期稳定压到 **2% 左右**，现实上比较难；如果硬压，通常会把策略压成低收益甚至接近不交易
-
-### 备注
-
-- 按你的要求，后续我每次做代码修改时都会同步更新这个文件
-- 补充接入了 `pullback` 策略框架，并完成了一轮 train/test 评估；当前 OOS 不佳，暂不建议作为主策略
-- 新增仓库 `.gitignore`，忽略 `.DS_Store`、`__pycache__/`、`.venv/` 以及 `artifacts/reports/` 这类本地/临时产物
-
 ## 2026-03-19 1.0.8（大扩展）
 
 ### 股票池扩展
@@ -703,3 +754,57 @@
 - 但我没有也不会虚假承诺“每个策略单独运行都稳定盈利”
 - 现在的框架更适合你持续做验证、筛选、迭代，而不是一次性宣布某个策略永远有效
 
+## 2026-03-19  1.0.7
+
+
+### Alpaca 免费版延迟保护
+
+- 检查后确认原来的 `deploy` 流程没有显式处理免费版约 15 分钟延迟的问题
+- 已在 [main.py](main.py) 新增保护逻辑：如果当前还是美东当日且未到 `16:15 ET`，则自动丢弃当天未确认完成的日线 bar
+- 这样部署时默认只基于上一个已完成交易日的日线做决策，避免把延迟中的“今天日线”误当成最终数据
+
+### 量化稳健性改造（本轮）
+
+- 在本机为项目创建了本地 `uv` 虚拟环境：`.venv`
+- 安装并补齐了运行依赖，额外补装 `pytz`
+- 跑通测试，当前 `pytest` 结果为 `4 passed`
+- 先完成了一轮基线回测：`train -> test -> walk-forward`
+
+### 策略层改动
+
+#### trend
+
+- 新增长期趋势过滤参数：`trend_filter_window`
+- 新增波动过滤参数：`volatility_window`、`max_daily_volatility`
+- 目标是减少高波动环境下的假突破，优先保留更平滑的趋势信号
+
+#### mean_reversion
+
+- 新增流动性过滤：`min_avg_dollar_volume`
+- 新增长期趋势过滤：`trend_window`
+- 新增三个稳健性开关：
+  - `require_above_trend_ma`
+  - `require_positive_trend_return`
+  - `require_rebound_bar`
+- 核心目的：避免在明显下跌趋势里反复抄底，把均值回归收缩成“顺大趋势里的短线回撤反弹”
+
+### 训练评分修正
+
+- 修正了 `calmar` 目标的一个退化问题：
+  - 以前参数搜索会偏向“几乎不交易”的组合，因为回撤接近 0，导致 `calmar` 虚高
+- 现在做了两层约束：
+  - `calmar` 的回撤分母设置最小有效值 `0.02`
+  - 新增信号活跃度过滤，过于低频的参数组合会被跳过
+- 这样能避免把“躺平不交易”误判成“稳健策略”
+
+### 当前结论（阶段性）
+
+- `trend` 仍然是目前更有交易价值的单策略
+- `mean_reversion` 在加了稳健过滤后，回撤明显收敛，但收益也被压得很低，暂时更像辅助/候补策略，而不是主策略
+- 仅靠当前这套日线股票逻辑，想把“单策略最大回撤”长期稳定压到 **2% 左右**，现实上比较难；如果硬压，通常会把策略压成低收益甚至接近不交易
+
+### 备注
+
+- 按你的要求，后续我每次做代码修改时都会同步更新这个文件
+- 补充接入了 `pullback` 策略框架，并完成了一轮 train/test 评估；当前 OOS 不佳，暂不建议作为主策略
+- 新增仓库 `.gitignore`，忽略 `.DS_Store`、`__pycache__/`、`.venv/` 以及 `artifacts/reports/` 这类本地/临时产物

@@ -1,0 +1,654 @@
+{
+  "generated_at_utc": "2026-03-20T14:00:12Z",
+  "spec": {
+    "train_start": "2016-01-01",
+    "train_end": "2021-12-31",
+    "oos_start": "2022-01-01",
+    "oos_end": "2024-12-31",
+    "aggressive_model_path": "artifacts/selected_factors/low_corr_alpha_model.json",
+    "conservative_model_path": "artifacts/selected_factors/low_corr_alpha_overlay_model.json",
+    "candidate_factors": null,
+    "top_n": 10,
+    "rebalance_every_n_days": 1,
+    "trade_filters": {
+      "min_close_location_1": 0.05,
+      "max_true_range_pct_1": 0.09,
+      "max_volume_surprise_5": 4.0,
+      "max_abs_ma_distance_20": 0.15,
+      "min_liquidity_20": 16.0
+    },
+    "max_drawdown_gap": 0.05,
+    "target_max_dd": 0.15,
+    "gross_exposure_grid": [
+      0.75,
+      1.0
+    ],
+    "portfolio_soft_dd_grid": [
+      0.1
+    ],
+    "portfolio_deleverage_grid": [
+      0.65
+    ],
+    "portfolio_hard_dd_grid": [
+      0.15
+    ],
+    "portfolio_cooldown_days_grid": [
+      5
+    ]
+  },
+  "train_regime_mix": {
+    "trend_low_vol": 0.823841059602649,
+    "range_low_vol": 0.13443708609271524,
+    "trend_high_vol": 0.026490066225165563,
+    "range_high_vol": 0.015231788079470199
+  },
+  "oos_regime_mix": {
+    "trend_low_vol": 0.8736702127659575,
+    "range_low_vol": 0.11569148936170212,
+    "trend_high_vol": 0.010638297872340425
+  },
+  "regime_models": {
+    "range_low_vol": {
+      "candidate_pool": [
+        {
+          "factor": "low_volatility_20",
+          "category": "volatility",
+          "description": "过去 20 日收益波动率取负号，值越大代表越低波。",
+          "direction": -1,
+          "direction_label": "inverse",
+          "train_rank_ic": 0.09255057183036132,
+          "oos_rank_ic": 0.04709816193956926,
+          "train_spread": 0.009776845030714344,
+          "oos_spread": 0.0034747449300695536,
+          "train_hit_rate": 0.7195121951219512,
+          "oos_hit_rate": 0.5517241379310345,
+          "selection_score": 0.05759120715314748
+        },
+        {
+          "factor": "trend_pullback_20_5",
+          "category": "momentum",
+          "description": "20 日趋势强度减去近 5 日回撤，用来刻画 trend + pullback。",
+          "direction": -1,
+          "direction_label": "inverse",
+          "train_rank_ic": 0.08033952822968249,
+          "oos_rank_ic": 0.0488423616320361,
+          "train_spread": 0.007808744455810425,
+          "oos_spread": 0.0051635287443067505,
+          "train_hit_rate": 0.6463414634146342,
+          "oos_hit_rate": 0.6206896551724138,
+          "selection_score": 0.05249316073577019
+        },
+        {
+          "factor": "momentum_20",
+          "category": "momentum",
+          "description": "过去 20 个交易日收益率，用于做横截面 relative strength 排名。",
+          "direction": -1,
+          "direction_label": "inverse",
+          "train_rank_ic": 0.08343884887536486,
+          "oos_rank_ic": 0.031147643142474254,
+          "train_spread": 0.007824465932542365,
+          "oos_spread": 0.0026860048934239703,
+          "train_hit_rate": 0.7195121951219512,
+          "oos_hit_rate": 0.5402298850574713,
+          "selection_score": 0.04833404531588022
+        },
+        {
+          "factor": "momentum_60",
+          "category": "momentum",
+          "description": "过去 60 个交易日收益率，用于观察更慢一点的中期趋势强度。",
+          "direction": -1,
+          "direction_label": "inverse",
+          "train_rank_ic": 0.040587966320460606,
+          "oos_rank_ic": 0.07122696694752836,
+          "train_spread": 0.003560550079808528,
+          "oos_spread": 0.008070912626725806,
+          "train_hit_rate": 0.5460122699386503,
+          "oos_hit_rate": 0.6551724137931034,
+          "selection_score": 0.04097384870310964
+        }
+      ],
+      "dropped_factors": {
+        "reversal_3": "oriented_train_rank_ic=0.0097 低于阈值",
+        "reversal_5": "oriented_oos_rank_ic=-0.0118 低于阈值",
+        "vol_compression_10_40": "oriented_oos_rank_ic=-0.0600 低于阈值",
+        "volume_surprise_5": "oriented_oos_rank_ic=-0.0095 低于阈值",
+        "turnover_shock_20": "oriented_train_rank_ic=0.0009 低于阈值",
+        "liquidity_20": "oriented_oos_rank_ic=-0.0239 低于阈值",
+        "breakout_distance_20": "oriented_oos_hit_rate=49.43% 低于阈值",
+        "close_location_1": "oriented_oos_rank_ic=-0.0195 低于阈值",
+        "gap_continuation_1": "oriented_train_rank_ic=0.0011 低于阈值",
+        "ma_distance_20": "oriented_oos_rank_ic=-0.0024 低于阈值"
+      },
+      "train_sample_days": 164,
+      "oos_sample_days": 87,
+      "aggressive_candidate_count": 3,
+      "aggressive": {
+        "factors": [
+          "low_volatility_20",
+          "momentum_60"
+        ],
+        "factor_weights": {
+          "low_volatility_20": -0.584296398483616,
+          "momentum_60": -0.41570360151638397
+        },
+        "max_abs_corr": 0.04684869239760549,
+        "avg_abs_corr": 0.04684869239760549,
+        "train_metrics": {
+          "sharpe": 1.2082466716612519,
+          "sortino": 0.776918944135697,
+          "cagr": 0.07616660746180104,
+          "max_dd": -0.06180763042408277,
+          "calmar": 1.2323172226141694,
+          "annual_vol": 0.062347193529208846,
+          "avg_turnover": 0.08569536423841059,
+          "avg_active_positions": 0.847682119205298,
+          "trade_count": 619.0
+        },
+        "oos_metrics": {
+          "sharpe": 0.4592455157563227,
+          "sortino": 0.27275632176980535,
+          "cagr": 0.03731682489061061,
+          "max_dd": -0.2087829597583325,
+          "calmar": 0.17873501234787706,
+          "annual_vol": 0.0885432123888483,
+          "avg_turnover": 0.10345744680851066,
+          "avg_active_positions": 0.9468085106382979,
+          "trade_count": 370.0
+        },
+        "train_latest_picks": [
+          "PYPL",
+          "META",
+          "LRCX",
+          "CMCSA",
+          "AMAT",
+          "ROST",
+          "EA",
+          "DE",
+          "TMUS",
+          "MDT"
+        ],
+        "oos_latest_picks": [
+          "FTNT",
+          "CSCO",
+          "APD",
+          "GM",
+          "F",
+          "CAT",
+          "PYPL",
+          "NEE",
+          "ABNB",
+          "FCX"
+        ],
+        "stability_score": 0.5775017622679752
+      },
+      "conservative": {
+        "factors": [
+          "low_volatility_20",
+          "momentum_60"
+        ],
+        "factor_weights": {
+          "low_volatility_20": -0.584296398483616,
+          "momentum_60": -0.41570360151638397
+        },
+        "risk_overrides": {
+          "gross_exposure": 0.75,
+          "portfolio_soft_dd_limit": 0.1,
+          "portfolio_deleverage_ratio": 0.65,
+          "portfolio_hard_dd_limit": 0.15,
+          "portfolio_kill_cooldown_days": 5
+        },
+        "train_metrics": {
+          "sharpe": 1.2082528239534691,
+          "sortino": 0.7769253970767056,
+          "cagr": 0.0569825152274841,
+          "max_dd": -0.04647404952211731,
+          "calmar": 1.226114698680166,
+          "annual_vol": 0.046764877400134144,
+          "avg_turnover": 0.06427152317880795,
+          "avg_active_positions": 0.847682119205298,
+          "trade_count": 619.0
+        },
+        "oos_metrics": {
+          "sharpe": 0.4780296325139443,
+          "sortino": 0.2757951236139943,
+          "cagr": 0.02826564932259168,
+          "max_dd": -0.14478218340430393,
+          "calmar": 0.19522878200741514,
+          "annual_vol": 0.06258669756242312,
+          "avg_turnover": 0.07411062563323202,
+          "avg_active_positions": 0.9468085106382979,
+          "trade_count": 370.0
+        },
+        "train_latest_picks": [
+          "PYPL",
+          "META",
+          "LRCX",
+          "CMCSA",
+          "AMAT",
+          "ROST",
+          "EA",
+          "DE",
+          "TMUS",
+          "MDT"
+        ],
+        "oos_latest_picks": [
+          "FTNT",
+          "CSCO",
+          "APD",
+          "GM",
+          "F",
+          "CAT",
+          "PYPL",
+          "NEE",
+          "ABNB",
+          "FCX"
+        ],
+        "risk_overlay": {
+          "soft_deleverage_days": 22.0,
+          "hard_kill_count": 0.0,
+          "cooldown_days_applied": 0.0
+        },
+        "score": [
+          true,
+          0.4780296325139443,
+          0.02826564932259168,
+          -0.14478218340430393,
+          1.2082528239534691,
+          -0.04647404952211731
+        ]
+      },
+      "selection": {
+        "selected_variant": "conservative",
+        "selection_reason": "激进版 OOS MaxDD=20.88%，超过低回撤版 14.48% + 容忍差 5.00%"
+      },
+      "fallback_used": false
+    },
+    "range_high_vol": {
+      "candidate_pool": [],
+      "dropped_factors": {
+        "momentum_20": "train/oos regime 样本不足，核心统计为 NaN",
+        "momentum_60": "train/oos regime 样本不足，核心统计为 NaN",
+        "trend_pullback_20_5": "train/oos regime 样本不足，核心统计为 NaN",
+        "reversal_3": "train/oos regime 样本不足，核心统计为 NaN",
+        "reversal_5": "train/oos regime 样本不足，核心统计为 NaN",
+        "low_volatility_20": "train/oos regime 样本不足，核心统计为 NaN",
+        "vol_compression_10_40": "train/oos regime 样本不足，核心统计为 NaN",
+        "true_range_pct_1": "train/oos regime 样本不足，核心统计为 NaN",
+        "volume_surprise_5": "train/oos regime 样本不足，核心统计为 NaN",
+        "turnover_shock_20": "train/oos regime 样本不足，核心统计为 NaN",
+        "liquidity_20": "train/oos regime 样本不足，核心统计为 NaN",
+        "breakout_distance_20": "train/oos regime 样本不足，核心统计为 NaN",
+        "close_location_1": "train/oos regime 样本不足，核心统计为 NaN",
+        "gap_continuation_1": "train/oos regime 样本不足，核心统计为 NaN",
+        "ma_distance_20": "train/oos regime 样本不足，核心统计为 NaN"
+      },
+      "train_sample_days": 3,
+      "oos_sample_days": 0,
+      "aggressive_candidate_count": 0,
+      "aggressive": {
+        "factors": [
+          "low_volatility_20",
+          "reversal_5",
+          "trend_pullback_20_5"
+        ],
+        "factor_weights": {
+          "low_volatility_20": -0.42694226618377334,
+          "reversal_5": 0.3214609837882461,
+          "trend_pullback_20_5": -0.2515967500279806
+        },
+        "train_metrics": {
+          "sharpe": -0.324095161771532,
+          "sortino": -0.026322155265123846,
+          "cagr": -0.018630283252729196,
+          "max_dd": -0.1545818239797262,
+          "calmar": -0.1205205293414838,
+          "annual_vol": 0.05341752893293604,
+          "avg_turnover": 0.0037086092715231792,
+          "avg_active_positions": 0.019205298013245033,
+          "trade_count": 28.0
+        },
+        "oos_metrics": {
+          "sharpe": 0.0,
+          "sortino": NaN,
+          "cagr": 0.0,
+          "max_dd": 0.0,
+          "calmar": 0.0,
+          "annual_vol": 0.0,
+          "avg_turnover": 0.0,
+          "avg_active_positions": 0.0,
+          "trade_count": 0.0
+        }
+      },
+      "conservative": {
+        "factors": [
+          "low_volatility_20",
+          "reversal_5",
+          "trend_pullback_20_5"
+        ],
+        "factor_weights": {
+          "low_volatility_20": -0.42694226618377334,
+          "reversal_5": 0.3214609837882461,
+          "trend_pullback_20_5": -0.2515967500279806
+        },
+        "train_metrics": {
+          "sharpe": -0.30391208012016513,
+          "sortino": -0.026012842597217607,
+          "cagr": -0.006124473200978753,
+          "max_dd": -0.05757688562671759,
+          "calmar": -0.10637034522114588,
+          "annual_vol": 0.019573927316838637,
+          "avg_turnover": 0.0014834437086092716,
+          "avg_active_positions": 0.018543046357615896,
+          "trade_count": 28.0
+        },
+        "oos_metrics": {
+          "sharpe": 0.0,
+          "sortino": NaN,
+          "cagr": 0.0,
+          "max_dd": 0.0,
+          "calmar": 0.0,
+          "annual_vol": 0.0,
+          "avg_turnover": 0.0,
+          "avg_active_positions": 0.0,
+          "trade_count": 0.0
+        },
+        "risk_overrides": {
+          "gross_exposure": 0.4,
+          "stop_loss_pct": 0.025,
+          "take_profit_pct": 0.08,
+          "trailing_stop_atr_multiple": 1.25,
+          "max_holding_days": 3,
+          "portfolio_soft_dd_limit": 0.1,
+          "portfolio_deleverage_ratio": 0.65,
+          "portfolio_hard_dd_limit": 0.15,
+          "portfolio_kill_cooldown_days": 5
+        }
+      },
+      "selection": {
+        "selected_variant": "aggressive",
+        "selection_reason": "激进版 OOS MaxDD=0.00%，未超过低回撤版 0.00% + 容忍差 5.00%"
+      },
+      "fallback_used": true
+    },
+    "trend_low_vol": {
+      "candidate_pool": [
+        {
+          "factor": "ma_distance_20",
+          "category": "breakout",
+          "description": "收盘相对 20 日均线的偏离度。",
+          "direction": -1,
+          "direction_label": "inverse",
+          "train_rank_ic": 0.011122914430414717,
+          "oos_rank_ic": 0.008706003157552744,
+          "train_spread": 0.0007649666209128715,
+          "oos_spread": 0.000457028089004739,
+          "train_hit_rate": 0.5221953188054883,
+          "oos_hit_rate": 0.504601226993865,
+          "selection_score": 0.0077775602429898515
+        }
+      ],
+      "dropped_factors": {
+        "momentum_20": "oriented_oos_rank_ic=0.0033 低于阈值",
+        "momentum_60": "oriented_train_rank_ic=0.0027 低于阈值",
+        "trend_pullback_20_5": "oriented_train_rank_ic=0.0090 低于阈值",
+        "reversal_3": "oriented_train_rank_ic=0.0084 低于阈值",
+        "reversal_5": "oriented_train_rank_ic=0.0089 低于阈值",
+        "low_volatility_20": "oriented_train_rank_ic=0.0083 低于阈值",
+        "vol_compression_10_40": "oriented_train_rank_ic=0.0019 低于阈值",
+        "true_range_pct_1": "oriented_train_rank_ic=0.0062 低于阈值",
+        "volume_surprise_5": "oriented_train_rank_ic=0.0002 低于阈值",
+        "turnover_shock_20": "oriented_train_rank_ic=0.0021 低于阈值",
+        "liquidity_20": "oriented_oos_rank_ic=-0.0063 低于阈值",
+        "breakout_distance_20": "oriented_train_rank_ic=0.0079 低于阈值",
+        "close_location_1": "oriented_train_rank_ic=0.0080 低于阈值",
+        "gap_continuation_1": "oriented_train_rank_ic=0.0058 低于阈值"
+      },
+      "train_sample_days": 1244,
+      "oos_sample_days": 657,
+      "aggressive_candidate_count": 0,
+      "aggressive": {
+        "factors": [
+          "low_volatility_20",
+          "reversal_5",
+          "trend_pullback_20_5"
+        ],
+        "factor_weights": {
+          "low_volatility_20": -0.42694226618377334,
+          "reversal_5": 0.3214609837882461,
+          "trend_pullback_20_5": -0.2515967500279806
+        },
+        "train_metrics": {
+          "sharpe": 0.6373063581068498,
+          "sortino": 0.8504531191019566,
+          "cagr": 0.09688459740204935,
+          "max_dd": -0.2392629656247487,
+          "calmar": 0.40492935105383043,
+          "annual_vol": 0.16693338546566294,
+          "avg_turnover": 0.7480132450331126,
+          "avg_active_positions": 6.632450331125828,
+          "trade_count": 5277.0
+        },
+        "oos_metrics": {
+          "sharpe": 0.17345998770347268,
+          "sortino": 0.23020895264515648,
+          "cagr": 0.0143793185101313,
+          "max_dd": -0.2896090126382407,
+          "calmar": 0.04965079773965215,
+          "annual_vol": 0.21123604898880974,
+          "avg_turnover": 0.8034574468085107,
+          "avg_active_positions": 7.122340425531915,
+          "trade_count": 2841.0
+        }
+      },
+      "conservative": {
+        "factors": [
+          "low_volatility_20",
+          "reversal_5",
+          "trend_pullback_20_5"
+        ],
+        "factor_weights": {
+          "low_volatility_20": -0.42694226618377334,
+          "reversal_5": 0.3214609837882461,
+          "trend_pullback_20_5": -0.2515967500279806
+        },
+        "train_metrics": {
+          "sharpe": 0.5800774010580662,
+          "sortino": 0.7661544399239734,
+          "cagr": 0.03609960676565094,
+          "max_dd": -0.07463779090608502,
+          "calmar": 0.4836639231537621,
+          "annual_vol": 0.06474778014784051,
+          "avg_turnover": 0.314066225165563,
+          "avg_active_positions": 6.417218543046357,
+          "trade_count": 5651.0
+        },
+        "oos_metrics": {
+          "sharpe": -0.00717109400592142,
+          "sortino": -0.009350077506491946,
+          "cagr": -0.003887278513881043,
+          "max_dd": -0.13140618554535122,
+          "calmar": -0.029582157778332844,
+          "annual_vol": 0.08150517858666516,
+          "avg_turnover": 0.3320795128335023,
+          "avg_active_positions": 6.849734042553192,
+          "trade_count": 3048.0
+        },
+        "risk_overrides": {
+          "gross_exposure": 0.4,
+          "stop_loss_pct": 0.025,
+          "take_profit_pct": 0.08,
+          "trailing_stop_atr_multiple": 1.25,
+          "max_holding_days": 3,
+          "portfolio_soft_dd_limit": 0.1,
+          "portfolio_deleverage_ratio": 0.65,
+          "portfolio_hard_dd_limit": 0.15,
+          "portfolio_kill_cooldown_days": 5
+        }
+      },
+      "selection": {
+        "selected_variant": "conservative",
+        "selection_reason": "激进版 OOS MaxDD=28.96%，超过低回撤版 13.14% + 容忍差 5.00%"
+      },
+      "fallback_used": true
+    },
+    "trend_high_vol": {
+      "candidate_pool": [
+        {
+          "factor": "reversal_5",
+          "category": "reversal",
+          "description": "过去 5 日收益率取负号，值越大代表短期越超跌。",
+          "direction": 1,
+          "direction_label": "positive",
+          "train_rank_ic": 0.2680492792238617,
+          "oos_rank_ic": 0.15085443717854832,
+          "train_spread": 0.053154352236051805,
+          "oos_spread": 0.015025429680829972,
+          "train_hit_rate": 0.725,
+          "oos_hit_rate": 0.75,
+          "selection_score": 0.17535420260779302
+        },
+        {
+          "factor": "reversal_3",
+          "category": "reversal",
+          "description": "过去 3 日收益率取负号，值越大代表短期越超跌。",
+          "direction": 1,
+          "direction_label": "positive",
+          "train_rank_ic": 0.19888287577781924,
+          "oos_rank_ic": 0.22803363608182953,
+          "train_spread": 0.03773003628863464,
+          "oos_spread": 0.025673626787049222,
+          "train_hit_rate": 0.725,
+          "oos_hit_rate": 0.875,
+          "selection_score": 0.16613425304656762
+        },
+        {
+          "factor": "ma_distance_20",
+          "category": "breakout",
+          "description": "收盘相对 20 日均线的偏离度。",
+          "direction": -1,
+          "direction_label": "inverse",
+          "train_rank_ic": 0.18223614353412745,
+          "oos_rank_ic": 0.20386197798236605,
+          "train_spread": 0.035982795188373926,
+          "oos_spread": 0.0212231208058936,
+          "train_hit_rate": 0.65,
+          "oos_hit_rate": 0.875,
+          "selection_score": 0.15068458934391263
+        },
+        {
+          "factor": "breakout_distance_20",
+          "category": "breakout",
+          "description": "当前收盘相对 20 日前高的距离，越靠近突破越高。",
+          "direction": -1,
+          "direction_label": "inverse",
+          "train_rank_ic": 0.13524961584992676,
+          "oos_rank_ic": 0.2562884722439013,
+          "train_spread": 0.026246263112746932,
+          "oos_spread": 0.03223221535855973,
+          "train_hit_rate": 0.575,
+          "oos_hit_rate": 0.875,
+          "selection_score": 0.14490902980840542
+        }
+      ],
+      "dropped_factors": {
+        "momentum_20": "oriented_train_hit_rate=35.00% 低于阈值",
+        "momentum_60": "oriented_train_hit_rate=42.50% 低于阈值",
+        "trend_pullback_20_5": "oriented_oos_rank_ic=-0.0997 低于阈值",
+        "vol_compression_10_40": "oriented_train_rank_ic=0.0091 低于阈值",
+        "volume_surprise_5": "oriented_oos_rank_ic=-0.0233 低于阈值",
+        "liquidity_20": "oriented_train_rank_ic=0.0028 低于阈值"
+      },
+      "train_sample_days": 40,
+      "oos_sample_days": 8,
+      "aggressive_candidate_count": 0,
+      "aggressive": {
+        "factors": [
+          "low_volatility_20",
+          "reversal_5",
+          "trend_pullback_20_5"
+        ],
+        "factor_weights": {
+          "low_volatility_20": -0.42694226618377334,
+          "reversal_5": 0.3214609837882461,
+          "trend_pullback_20_5": -0.2515967500279806
+        },
+        "train_metrics": {
+          "sharpe": -0.15174380208083338,
+          "sortino": -0.03704208849854489,
+          "cagr": -0.022403732259687503,
+          "max_dd": -0.232676588288674,
+          "calmar": -0.09628700688956149,
+          "annual_vol": 0.10936764577035289,
+          "avg_turnover": 0.03350993377483443,
+          "avg_active_positions": 0.2165562913907285,
+          "trade_count": 243.0
+        },
+        "oos_metrics": {
+          "sharpe": 0.09404329352067711,
+          "sortino": 0.011872184801671683,
+          "cagr": 0.002956621185904229,
+          "max_dd": -0.052133718954312847,
+          "calmar": 0.05671226310247575,
+          "annual_vol": 0.04017695586941747,
+          "avg_turnover": 0.010904255319148938,
+          "avg_active_positions": 0.08643617021276596,
+          "trade_count": 41.0
+        }
+      },
+      "conservative": {
+        "factors": [
+          "low_volatility_20",
+          "reversal_5",
+          "trend_pullback_20_5"
+        ],
+        "factor_weights": {
+          "low_volatility_20": -0.42694226618377334,
+          "reversal_5": 0.3214609837882461,
+          "trend_pullback_20_5": -0.2515967500279806
+        },
+        "train_metrics": {
+          "sharpe": -0.1925377448055588,
+          "sortino": -0.04427058249657803,
+          "cagr": -0.008858916960429397,
+          "max_dd": -0.09585067949846171,
+          "calmar": -0.0924241435396308,
+          "annual_vol": 0.04167123718331667,
+          "avg_turnover": 0.013933774834437088,
+          "avg_active_positions": 0.20662251655629138,
+          "trade_count": 252.0
+        },
+        "oos_metrics": {
+          "sharpe": 0.18532945593426273,
+          "sortino": 0.024234030468947895,
+          "cagr": 0.002941630045731225,
+          "max_dd": -0.01998986175449524,
+          "calmar": 0.1471560975114081,
+          "annual_vol": 0.016650879871251863,
+          "avg_turnover": 0.004680851063829788,
+          "avg_active_positions": 0.08776595744680851,
+          "trade_count": 44.0
+        },
+        "risk_overrides": {
+          "gross_exposure": 0.4,
+          "stop_loss_pct": 0.025,
+          "take_profit_pct": 0.08,
+          "trailing_stop_atr_multiple": 1.25,
+          "max_holding_days": 3,
+          "portfolio_soft_dd_limit": 0.1,
+          "portfolio_deleverage_ratio": 0.65,
+          "portfolio_hard_dd_limit": 0.15,
+          "portfolio_kill_cooldown_days": 5
+        }
+      },
+      "selection": {
+        "selected_variant": "aggressive",
+        "selection_reason": "激进版 OOS MaxDD=5.21%，未超过低回撤版 2.00% + 容忍差 5.00%"
+      },
+      "fallback_used": true
+    }
+  },
+  "report_files": {
+    "json": "artifacts/reports/alpha_combo_regime_switch_20260320_140012.json",
+    "markdown": "artifacts/reports/alpha_combo_regime_switch_20260320_140012.md"
+  }
+}
