@@ -204,25 +204,28 @@
 
 ### 策略层现在处于次要位置
 
-策略源码仍然保留，因为它们可以继续拆成原子因子或做辅助比较。
+策略层现在只保留仍然接在当前命令链路里的活跃策略，已经退役的旧实验策略和历史残留文件都清掉了。
 
 当前默认活跃策略池：
 
 - [strategy/multi_factor_short/multi_factor_short.py](strategy/multi_factor_short/multi_factor_short.py)
 - [strategy/mean_reversion/mean_reversion.py](strategy/mean_reversion/mean_reversion.py)
 
-已降级但保留源码的策略：
+当前保留这两条的原因：
 
-- [strategy/short_reversal/short_reversal.py](strategy/short_reversal/short_reversal.py)
-  - 这轮短线研究里训练和 OOS 都不够稳，已经从默认活跃池移除
-- [strategy/trend/trend.py](strategy/trend/trend.py)
-  - 旧的中周期趋势突破，保留作后续研究素材
-- [strategy/turtle/turtle.py](strategy/turtle/turtle.py)
-  - 旧的 Donchian / 海龟风格突破，保留作后续研究素材
-- [strategy/pullback/pullback.py](strategy/pullback/pullback.py)
-  - 旧的趋势回撤策略，当前不是默认研究重点
-- [strategy/low_vol_momentum/low_vol_momentum.py](strategy/low_vol_momentum/low_vol_momentum.py)
-  - 旧的低波动动量策略，当前不是默认研究重点
+- `multi_factor_short`
+  - 仍然适合拿来和因子组合做短线横向比较
+- `mean_reversion`
+  - 仍然是当前策略层里最有保留价值的均值回归基线
+
+已经退役且不再保留源码的旧实验策略包括：
+
+- `short_reversal`
+- `trend`
+- `turtle`
+- `pullback`
+- `low_vol_momentum`
+- `compression_breakout`
 
 ### 策略设计原则
 
@@ -542,16 +545,10 @@ python main.py walk-forward --start 2016-01-01 --end 2024-12-31 --strategies mea
 - 先冻结因子集合和组合方法，再看 OOS 组合收益
 - Walk-forward 是稳定性体检，不是重新偷偷调因子
 
-策略研究仍然保留，最近一轮旧策略报告在：
-
-- [artifacts/reports/pipeline_20260320_030253.md](artifacts/reports/pipeline_20260320_030253.md)
-- [artifacts/reports/pipeline_20260320_030253.json](artifacts/reports/pipeline_20260320_030253.json)
-
-当前阶段性的解读是：
+策略研究仍然保留，但现在只把它当作辅助比较层，不再作为项目主线。当前阶段性的解读是：
 
 - `multi_factor_short` 是最值得继续保留的短线主研究策略
 - `mean_reversion` 是保留观察的次候选
-- `short_reversal` 已经从默认活跃池移除
 - 现在还没有进入“把多条单策略稳定组合成最终实盘模板”的阶段
 
 ---
@@ -829,3 +826,4 @@ python -m pytest -q
 - 最后才改策略和因子
 
 这样你才知道结果变化到底来自哪一步，而不是一下子把所有变量都搅在一起。
+

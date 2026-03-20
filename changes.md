@@ -1,5 +1,50 @@
 # Changes Log
 
+## 2026-03-21 1.0.17（清理重构后无关文件）
+
+### 项目结构清理
+
+- 重新恢复了根目录主文档：
+  - [README.md](README.md)
+  - [changes.md](changes.md)
+- 删除了重复文档目录：
+  - `md_documents/`
+- 删除了空目录和缓存：
+  - `logs/`
+  - `output/`
+  - 各层 `__pycache__/`
+
+### 旧策略与旧参数清理
+
+- 保留当前仍接在主命令链路里的策略：
+  - [strategy/mean_reversion/mean_reversion.py](strategy/mean_reversion/mean_reversion.py)
+  - [strategy/multi_factor_short/multi_factor_short.py](strategy/multi_factor_short/multi_factor_short.py)
+- 删除已经退役、且不再被当前注册表和默认配置使用的旧策略目录：
+  - `strategy/compression_breakout/`
+  - `strategy/low_vol_momentum/`
+  - `strategy/pullback/`
+  - `strategy/short_reversal/`
+  - `strategy/trend/`
+  - `strategy/turtle/`
+- 同时删除了对应的旧 frozen params，只保留当前仍可能被 `deploy` 使用的：
+  - `mean_reversion`
+  - `multi_factor_short`
+
+### 历史附加文件清理
+
+- 删除了已被新版结果替代的旧报告：
+  - 旧 `pipeline_*`
+  - 旧 `train_*`
+  - 旧 `test_*`
+  - 旧 `walk_forward_*`
+  - 旧探索版 `alpha_combo_search_*`
+  - 旧探索版 `alpha_combo_risk_search_*`
+- 当前保留的核心研究结果只剩：
+  - 最新正式因子主线报告
+  - 当前激进版 low-corr alpha 组合报告
+  - 当前 low-corr alpha walk-forward 报告
+  - 当前低回撤 risk-search 报告
+
 ## 2026-03-20 1.0.16（低相关 Alpha 风控搜索 + 硬止损实盘化）
 
 ### 风控搜索与硬止损
@@ -381,7 +426,7 @@
 
 ### 文档
 
-- 更新了 [README.md](README.md)
+- 更新了 [README.md](md_documents/README.md)
   - 改成以当前短线研究状态为准
   - 删掉了默认策略仍是旧长周期池的写法
   - 加入最新短线报告位置
@@ -457,7 +502,7 @@
 
 ### 文档
 
-- 更新了 [README.md](README.md)
+- 更新了 [README.md](md_documents/README.md)
   - 写清楚 `all` 和 `raw` 的分工
   - 写清楚趋势里的 `VIX` 代理过滤
   - 写清楚自动邮件通知和邮件标题类型
@@ -645,7 +690,7 @@
 
 ### 文档
 
-- 重写了 [README.md](README.md)
+- 重写了 [README.md](md_documents/README.md)
   - 加入股票池说明
   - 加入新策略说明
   - 加入回测引擎和优化器说明
@@ -657,3 +702,4 @@
 - 这次改动的目标是让系统更完整、更稳健、更适合继续研究
 - 但我没有也不会虚假承诺“每个策略单独运行都稳定盈利”
 - 现在的框架更适合你持续做验证、筛选、迭代，而不是一次性宣布某个策略永远有效
+

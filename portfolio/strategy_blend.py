@@ -19,7 +19,7 @@ class StrategyBlendConfig:
     min_strategy_weight: float = 0.05
     high_vol_haircut: float = 0.35
     trend_strategies: tuple[str, ...] = ()
-    range_strategies: tuple[str, ...] = ("mean_reversion", "short_reversal")
+    range_strategies: tuple[str, ...] = ("mean_reversion",)
     defensive_strategies: tuple[str, ...] = ("multi_factor_short",)
 
 
