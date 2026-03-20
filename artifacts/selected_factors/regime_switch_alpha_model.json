@@ -309,7 +309,7 @@
         },
         "oos_metrics": {
           "sharpe": 0.0,
-          "sortino": NaN,
+          "sortino": null,
           "cagr": 0.0,
           "max_dd": 0.0,
           "calmar": 0.0,
@@ -343,7 +343,7 @@
         },
         "oos_metrics": {
           "sharpe": 0.0,
-          "sortino": NaN,
+          "sortino": null,
           "cagr": 0.0,
           "max_dd": 0.0,
           "calmar": 0.0,
