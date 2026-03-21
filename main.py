@@ -620,6 +620,25 @@ def _load_factor_combo_runtime(runtime: dict, test_cfg) -> dict:
     }
 
 
+def _apply_factor_combo_overrides(combo_cfg: dict, args: argparse.Namespace) -> dict:
+    overrides = combo_cfg.copy()
+    for key in (
+        "candidate_pool_size",
+        "min_combo_size",
+        "max_combo_size",
+        "max_combinations",
+        "max_pairwise_correlation",
+        "min_train_rank_ic",
+        "min_oos_rank_ic",
+        "min_train_hit_rate",
+        "min_oos_hit_rate",
+    ):
+        value = getattr(args, key, None)
+        if value is not None:
+            overrides[key] = value
+    return overrides
+
+
 def _load_alpha_trade_filters_runtime(runtime: dict) -> dict:
     filter_raw = runtime.get("alpha_trade_filters", {}) or {}
     return {
@@ -875,7 +894,7 @@ def cmd_alpha_combo_search(args: argparse.Namespace) -> None:
     )
     backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
     universe_cfg, standardize_cfg, test_cfg, _ = _load_factor_runtime_components(runtime)
-    combo_cfg = FactorComboSearchConfig(**_load_factor_combo_runtime(runtime, test_cfg))
+    combo_cfg = FactorComboSearchConfig(**_apply_factor_combo_overrides(_load_factor_combo_runtime(runtime, test_cfg), args))
     trade_filters = _load_alpha_trade_filters_runtime(runtime)
     top_n, rebalance_every_n_days = _load_composite_runtime(runtime, args)
 
@@ -916,7 +935,7 @@ def cmd_alpha_combo_walk_forward(args: argparse.Namespace) -> None:
     )
     backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
     universe_cfg, standardize_cfg, test_cfg, _ = _load_factor_runtime_components(runtime)
-    combo_cfg = FactorComboSearchConfig(**_load_factor_combo_runtime(runtime, test_cfg))
+    combo_cfg = FactorComboSearchConfig(**_apply_factor_combo_overrides(_load_factor_combo_runtime(runtime, test_cfg), args))
     trade_filters = _load_alpha_trade_filters_runtime(runtime)
     top_n, rebalance_every_n_days = _load_composite_runtime(runtime, args)
 
@@ -1035,6 +1054,10 @@ def cmd_alpha_combo_regime_switch(args: argparse.Namespace) -> None:
             trade_filters=trade_filters,
             max_drawdown_gap=args.max_drawdown_gap,
             target_max_dd=args.target_max_dd,
+            target_cagr=args.target_cagr,
+            mix_window_days=args.mix_window_days,
+            mix_step_days=args.mix_step_days,
+            min_mix_sample_days=args.min_mix_sample_days,
             gross_exposure_grid=args.gross_exposure_grid,
             portfolio_soft_dd_grid=args.portfolio_soft_dd_grid,
             portfolio_deleverage_grid=args.portfolio_deleverage_grid,
@@ -1418,6 +1441,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     combo_regime_parser.add_argument("--max-drawdown-gap", type=float, default=0.05)
     combo_regime_parser.add_argument("--target-max-dd", type=float, default=0.15)
+    combo_regime_parser.add_argument("--target-cagr", type=float, default=0.15)
+    combo_regime_parser.add_argument("--mix-window-days", type=int, default=63)
+    combo_regime_parser.add_argument("--mix-step-days", type=int, default=21)
+    combo_regime_parser.add_argument("--min-mix-sample-days", type=int, default=40)
+    combo_regime_parser.add_argument("--candidate-pool-size", type=int, default=None)
+    combo_regime_parser.add_argument("--min-combo-size", type=int, default=None)
+    combo_regime_parser.add_argument("--max-combo-size", type=int, default=None)
+    combo_regime_parser.add_argument("--max-combinations", type=int, default=None)
+    combo_regime_parser.add_argument("--max-pairwise-correlation", type=float, default=None)
+    combo_regime_parser.add_argument("--min-train-rank-ic", type=float, default=None)
+    combo_regime_parser.add_argument("--min-oos-rank-ic", type=float, default=None)
+    combo_regime_parser.add_argument("--min-train-hit-rate", type=float, default=None)
+    combo_regime_parser.add_argument("--min-oos-hit-rate", type=float, default=None)
     combo_regime_parser.add_argument("--gross-exposure-grid", nargs="+", type=float, default=None)
     combo_regime_parser.add_argument("--portfolio-soft-dd-grid", nargs="+", type=float, default=None)
     combo_regime_parser.add_argument("--portfolio-deleverage-grid", nargs="+", type=float, default=None)

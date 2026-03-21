@@ -1,5 +1,111 @@
 # Changes Log
 
+## 2026-03-21 1.0.20（新因子族扩展 + Mix-Aware 搜索提速）
+
+### 新增了四组原子因子族
+
+- 新增 [factors/trend_quality.py](factors/trend_quality.py)
+  - `momentum_120_skip_5`
+  - `trend_consistency_20`
+  - `efficiency_ratio_20`
+  - `risk_adjusted_momentum_60`
+- 新增 [factors/microstructure.py](factors/microstructure.py)
+  - `overnight_gap_5`
+  - `intraday_strength_5`
+  - `body_to_range_5`
+  - `channel_position_60`
+- 新增 [factors/flow.py](factors/flow.py)
+  - `amihud_illiquidity_20`
+  - `volume_dryup_10_60`
+  - `obv_trend_20`
+  - `dollar_volume_accel_20_60`
+- 新增 [factors/risk_structure.py](factors/risk_structure.py)
+  - `downside_risk_20`
+  - `range_expansion_5_20`
+  - `gap_volatility_20`
+  - `vol_of_range_20`
+- 更新了 [factors/__init__.py](factors/__init__.py)
+  - 把这些新因子正式接进统一注册表和 `build_factor_panel`
+
+### Mix-aware 研究链路做了缓存提速
+
+- 更新了 [pipelines/run_alpha_combo_regime_switch.py](pipelines/run_alpha_combo_regime_switch.py)
+- 新增了两层缓存：
+  - `score_frame` 级缓存
+  - 组合级风控 overlay 搜索缓存
+- 目的不是改研究逻辑，而是减少窗口回测里的重复算分
+- 这样后面做“多轮扩因子 -> 严格筛选 -> 再扩因子”的循环时，不会把时间都浪费在重复计算上
+
+### Regime 搜索参数现在可以从命令行覆盖
+
+- 更新了 [main.py](main.py)
+- `alpha-combo-regime-switch` 现在支持：
+  - `--candidate-pool-size`
+  - `--min-combo-size`
+  - `--max-combo-size`
+  - `--max-combinations`
+  - `--max-pairwise-correlation`
+  - `--min-train-rank-ic`
+  - `--min-oos-rank-ic`
+  - `--min-train-hit-rate`
+  - `--min-oos-hit-rate`
+- 这样后续做更广的搜索时，不需要去改全局 `runtime.yaml`
+
+### 测试
+
+- 新增 [tests/test_new_factor_families.py](tests/test_new_factor_families.py)
+- 已验证：
+  - 新因子家族已注册
+  - 新因子列能正常生成
+- 现有 [tests/test_regime_mixture_research.py](tests/test_regime_mixture_research.py) 继续通过
+
+## 2026-03-21 1.0.19（Regime Mix 研究 + 严格 CAGR 门槛）
+
+### Regime 研究从“硬切四类”升级成“窗口 mix 驱动”
+
+- 更新了 [pipelines/run_alpha_combo_regime_switch.py](pipelines/run_alpha_combo_regime_switch.py)
+- 更新了 [main.py](main.py)
+- `alpha-combo-regime-switch` 现在不只支持单日硬分类的：
+  - `trend_low_vol`
+  - `range_low_vol`
+  - `trend_high_vol`
+  - `range_high_vol`
+- 还新增了基于滚动窗口的 mixture-aware 研究：
+  - 用一段时间内的 regime 占比作为研究单元，例如 `trend_low_vol 70% + range_low_vol 30%`
+  - 先在 train 窗口里生成 mix 原型和对应组合
+  - 再拿 OOS 窗口按“最近 mix”做严格匹配验证
+
+### 把 `年化 >= 15%` 写进选择规则
+
+- `AlphaComboRegimeSwitchSpec` 新增了：
+  - `target_cagr`
+  - `mix_window_days`
+  - `mix_step_days`
+  - `min_mix_sample_days`
+- CLI 新增参数：
+  - `--target-cagr`
+  - `--mix-window-days`
+  - `--mix-step-days`
+  - `--min-mix-sample-days`
+- 当前选择逻辑不再只看“激进版回撤是否比保守版多 5%”
+- 现在会先检查：
+  - OOS `CAGR >= target_cagr`
+  - OOS `MaxDD <= target_max_dd`
+- 只有两者都达标时，才再用回撤容忍差决定选激进还是保守
+- 如果两者都不达标，就按：
+  - CAGR 缺口
+  - 回撤超额
+  - Sharpe / Calmar
+  做固定优先级比较，避免主观挑数
+
+### 严格性补丁
+
+- 新增测试：
+  - [tests/test_regime_mixture_research.py](tests/test_regime_mixture_research.py)
+- 补上了 JSON 导出清洗：
+  - 非有限浮点数不再写成非法的 `NaN`
+  - 会统一转成 `null`
+
 ## 2026-03-21 1.0.18（组合级风控 + Regime 切换因子）
 
 ### 组合级风控不再继续砍单票止损

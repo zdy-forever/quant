@@ -55,6 +55,10 @@ class AlphaComboRegimeSwitchSpec:
     trade_filters: Dict[str, float] | None = None
     max_drawdown_gap: float = 0.05
     target_max_dd: float = 0.15
+    target_cagr: float = 0.15
+    mix_window_days: int = 63
+    mix_step_days: int = 21
+    min_mix_sample_days: int = 40
     gross_exposure_grid: List[float] | None = None
     portfolio_soft_dd_grid: List[float] | None = None
     portfolio_deleverage_grid: List[float] | None = None
@@ -146,31 +150,71 @@ def _metric_value(metrics: Dict[str, Any], name: str) -> float:
     return float(metrics.get(name, 0.0) or 0.0)
 
 
-def _combo_stability_score(train_metrics: Dict[str, Any], oos_metrics: Dict[str, Any], max_abs_corr: float) -> float:
+def _passes_targets(metrics: Dict[str, Any], target_cagr: float, target_max_dd: float) -> bool:
+    cagr = _metric_value(metrics, "cagr")
+    max_dd = abs(_metric_value(metrics, "max_dd"))
+    return np.isfinite(cagr) and np.isfinite(max_dd) and cagr >= float(target_cagr) and max_dd <= float(target_max_dd)
+
+
+def _metric_priority(metrics: Dict[str, Any], target_cagr: float, target_max_dd: float) -> tuple:
+    cagr = _metric_value(metrics, "cagr")
+    max_dd = abs(_metric_value(metrics, "max_dd"))
+    sharpe = _metric_value(metrics, "sharpe")
+    calmar = _metric_value(metrics, "calmar")
     return (
-        0.35 * _metric_value(train_metrics, "sharpe")
+        int(_passes_targets(metrics, target_cagr, target_max_dd)),
+        -max(float(target_cagr) - cagr, 0.0),
+        -max(max_dd - float(target_max_dd), 0.0),
+        sharpe,
+        calmar,
+        cagr,
+        -max_dd,
+    )
+
+
+def _combo_stability_score(
+    train_metrics: Dict[str, Any],
+    oos_metrics: Dict[str, Any],
+    max_abs_corr: float,
+    target_cagr: float,
+    target_max_dd: float,
+) -> float:
+    oos_cagr_gap = max(float(target_cagr) - _metric_value(oos_metrics, "cagr"), 0.0)
+    oos_dd_gap = max(abs(_metric_value(oos_metrics, "max_dd")) - float(target_max_dd), 0.0)
+    feasibility_bonus = 2.0 if _passes_targets(oos_metrics, target_cagr, target_max_dd) else 0.0
+    return (
+        feasibility_bonus
+        + 0.35 * _metric_value(train_metrics, "sharpe")
         + 0.50 * _metric_value(oos_metrics, "sharpe")
         + 2.5 * _metric_value(oos_metrics, "cagr")
         - 0.75 * abs(_metric_value(oos_metrics, "max_dd"))
         - 0.25 * max_abs_corr
+        - 4.0 * oos_cagr_gap
+        - 4.0 * oos_dd_gap
     )
 
 
-def _overlay_candidate_score(train_metrics: Dict[str, Any], oos_metrics: Dict[str, Any], target_max_dd: float) -> tuple:
+def _overlay_candidate_score(
+    train_metrics: Dict[str, Any],
+    oos_metrics: Dict[str, Any],
+    target_max_dd: float,
+    target_cagr: float,
+) -> tuple:
     oos_dd = abs(_metric_value(oos_metrics, "max_dd"))
     train_dd = abs(_metric_value(train_metrics, "max_dd"))
-    feasible = oos_dd <= target_max_dd
+    feasible = oos_dd <= target_max_dd and _metric_value(oos_metrics, "cagr") >= target_cagr
     if feasible:
         return (
             True,
-            _metric_value(oos_metrics, "sharpe"),
             _metric_value(oos_metrics, "cagr"),
+            _metric_value(oos_metrics, "sharpe"),
             -oos_dd,
             _metric_value(train_metrics, "sharpe"),
             -train_dd,
         )
     return (
         False,
+        -max(float(target_cagr) - _metric_value(oos_metrics, "cagr"), 0.0),
         -oos_dd,
         _metric_value(oos_metrics, "sharpe"),
         _metric_value(oos_metrics, "cagr"),
@@ -183,6 +227,8 @@ def _select_variant(
     aggressive: Dict[str, Any] | None,
     conservative: Dict[str, Any] | None,
     max_drawdown_gap: float,
+    target_cagr: float,
+    target_max_dd: float,
 ) -> Dict[str, Any]:
     if aggressive is None and conservative is None:
         return {"selected_variant": "none", "selection_reason": "没有可用组合"}
@@ -191,9 +237,28 @@ def _select_variant(
     if conservative is None:
         return {"selected_variant": "aggressive", "selection_reason": "只有激进版本可用"}
 
+    aggressive_pass = _passes_targets(aggressive["oos_metrics"], target_cagr, target_max_dd)
+    conservative_pass = _passes_targets(conservative["oos_metrics"], target_cagr, target_max_dd)
+    if aggressive_pass and not conservative_pass:
+        return {
+            "selected_variant": "aggressive",
+            "selection_reason": (
+                f"激进版先满足 OOS CAGR>={float(target_cagr):.2%} 且 MaxDD<={float(target_max_dd):.2%}，"
+                "低回撤版未同时满足。"
+            ),
+        }
+    if conservative_pass and not aggressive_pass:
+        return {
+            "selected_variant": "conservative",
+            "selection_reason": (
+                f"低回撤版先满足 OOS CAGR>={float(target_cagr):.2%} 且 MaxDD<={float(target_max_dd):.2%}，"
+                "激进版未同时满足。"
+            ),
+        }
+
     aggressive_dd = abs(_metric_value(aggressive["oos_metrics"], "max_dd"))
     conservative_dd = abs(_metric_value(conservative["oos_metrics"], "max_dd"))
-    if aggressive_dd <= conservative_dd + float(max_drawdown_gap):
+    if aggressive_pass and conservative_pass and aggressive_dd <= conservative_dd + float(max_drawdown_gap):
         return {
             "selected_variant": "aggressive",
             "selection_reason": (
@@ -201,20 +266,33 @@ def _select_variant(
                 f"+ 容忍差 {float(max_drawdown_gap):.2%}"
             ),
         }
+    if aggressive_pass and conservative_pass:
+        return {
+            "selected_variant": "conservative",
+            "selection_reason": (
+                f"激进版 OOS MaxDD={aggressive_dd:.2%}，超过低回撤版 {conservative_dd:.2%} "
+                f"+ 容忍差 {float(max_drawdown_gap):.2%}"
+            ),
+        }
+
+    aggressive_priority = _metric_priority(aggressive["oos_metrics"], target_cagr, target_max_dd)
+    conservative_priority = _metric_priority(conservative["oos_metrics"], target_cagr, target_max_dd)
+    if aggressive_priority >= conservative_priority:
+        return {
+            "selected_variant": "aggressive",
+            "selection_reason": "两者都未完整达标，按 CAGR 缺口、回撤超额和风险调整收益综合后激进版更优。",
+        }
     return {
         "selected_variant": "conservative",
-        "selection_reason": (
-            f"激进版 OOS MaxDD={aggressive_dd:.2%}，超过低回撤版 {conservative_dd:.2%} "
-            f"+ 容忍差 {float(max_drawdown_gap):.2%}"
-        ),
+        "selection_reason": "两者都未完整达标，按 CAGR 缺口、回撤超额和风险调整收益综合后低回撤版更优。",
     }
 
 
 def _run_regime_factor_validation(
     ohlcv: pd.DataFrame,
     standardized_panel: pd.DataFrame,
-    regime_frame: pd.DataFrame,
-    regime_label: str,
+    regime_frame: pd.DataFrame | None,
+    regime_label: str | None,
     start: str,
     end: str,
     cfg: FactorTestConfig,
@@ -223,7 +301,8 @@ def _run_regime_factor_validation(
     window_panel = _slice_frame(standardized_panel, start, end)
     forward_panel = build_forward_returns(window_ohlcv, cfg.forward_days)
     panel = window_panel.merge(forward_panel.drop(columns=["close"]), on=["timestamp", "symbol"], how="left")
-    panel = _filter_by_regime(panel, regime_frame, regime_label)
+    if regime_frame is not None and regime_label:
+        panel = _filter_by_regime(panel, regime_frame, regime_label)
     panel = panel[panel["eligible"]].copy()
 
     factor_names = _factor_names(window_panel)
@@ -351,12 +430,112 @@ def _run_combo_backtest(
     }
 
 
+def _score_frame_cache_key(
+    selected_factors: List[str],
+    factor_weights: Dict[str, float],
+    top_n: int,
+    rebalance_every_n_days: int,
+    trade_filters: Dict[str, float] | None,
+) -> str:
+    return json.dumps(
+        {
+            "factors": list(selected_factors),
+            "factor_weights": {str(k): float(v) for k, v in (factor_weights or {}).items()},
+            "top_n": int(top_n),
+            "rebalance_every_n_days": int(rebalance_every_n_days),
+            "trade_filters": trade_filters or {},
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _build_combo_score_frame_cached(
+    cache: Dict[str, Dict[str, Any]],
+    standardized_panel: pd.DataFrame,
+    raw_panel: pd.DataFrame | None,
+    selected_factors: List[str],
+    factor_weights: Dict[str, float],
+    top_n: int,
+    rebalance_every_n_days: int,
+    trade_filters: Dict[str, float] | None,
+) -> Dict[str, Any]:
+    key = _score_frame_cache_key(
+        selected_factors,
+        factor_weights,
+        top_n,
+        rebalance_every_n_days,
+        trade_filters,
+    )
+    if key not in cache:
+        composite_cfg = CompositeConfig(
+            top_n=top_n,
+            weighting="custom" if factor_weights else "equal",
+            rebalance_every_n_days=rebalance_every_n_days,
+        )
+        score_frame = build_composite_score(
+            standardized_panel,
+            selected_factors,
+            composite_cfg,
+            custom_weights=factor_weights or None,
+        )
+        filter_diagnostics: Dict[str, Any] = {}
+        if trade_filters and raw_panel is not None:
+            score_frame, filter_diagnostics = apply_trade_filters(
+                score_frame,
+                raw_panel,
+                TradeFilterConfig(**trade_filters),
+            )
+        cache[key] = {
+            "score_frame": score_frame,
+            "filter_diagnostics": filter_diagnostics,
+        }
+    return cache[key]
+
+
+def _run_backtest_from_score_frame(
+    ohlcv: pd.DataFrame,
+    score_frame: pd.DataFrame,
+    filter_diagnostics: Dict[str, Any],
+    start: str,
+    end: str,
+    top_n: int,
+    rebalance_every_n_days: int,
+    backtest_cfg: BacktestConfig,
+    backtest_overrides: Dict[str, Any] | None = None,
+    regime_frame: pd.DataFrame | None = None,
+    regime_label: str | None = None,
+    include_latest_picks: bool = False,
+) -> Dict[str, Any]:
+    window_ohlcv = _slice_frame(ohlcv, start, end)
+    window_score_frame = _slice_frame(score_frame, start, end)
+    if regime_frame is not None and regime_label:
+        window_score_frame = _filter_by_regime(window_score_frame, regime_frame, regime_label)
+
+    signal = build_top_n_signal(window_score_frame, top_n)
+    result = run_signal_backtest(
+        window_ohlcv,
+        signal,
+        window_score_frame.set_index(["timestamp", "symbol"])["score"] if not window_score_frame.empty else None,
+        _clean_backtest_cfg(backtest_cfg, top_n, rebalance_every_n_days, backtest_overrides),
+    )
+    return {
+        "metrics": result["metrics"],
+        "latest_picks": latest_top_picks(window_score_frame, top_n) if include_latest_picks else [],
+        "filter_diagnostics": filter_diagnostics,
+        "risk_overlay": result.get("risk_overlay", {}),
+        "signal_days": int(window_score_frame["timestamp"].nunique()) if not window_score_frame.empty else 0,
+    }
+
+
 def _search_overlay_variant(
+    backtest_cache: Dict[str, Dict[str, Any]],
+    score_frame_cache: Dict[str, Dict[str, Any]],
     ohlcv: pd.DataFrame,
     standardized_panel: pd.DataFrame,
     raw_panel: pd.DataFrame,
-    regime_frame: pd.DataFrame,
-    regime_label: str,
+    regime_frame: pd.DataFrame | None,
+    regime_label: str | None,
     selected_factors: List[str],
     factor_weights: Dict[str, float],
     spec: AlphaComboRegimeSwitchSpec,
@@ -385,7 +564,9 @@ def _search_overlay_variant(
             "portfolio_hard_dd_limit": float(hard_dd),
             "portfolio_kill_cooldown_days": int(cooldown_days),
         }
-        train_result = _run_combo_backtest(
+        train_result = _run_combo_backtest_cached(
+            backtest_cache,
+            score_frame_cache,
             ohlcv,
             standardized_panel,
             raw_panel,
@@ -401,7 +582,9 @@ def _search_overlay_variant(
             regime_frame=regime_frame,
             regime_label=regime_label,
         )
-        oos_result = _run_combo_backtest(
+        oos_result = _run_combo_backtest_cached(
+            backtest_cache,
+            score_frame_cache,
             ohlcv,
             standardized_panel,
             raw_panel,
@@ -427,7 +610,7 @@ def _search_overlay_variant(
                 "train_latest_picks": train_result["latest_picks"],
                 "oos_latest_picks": oos_result["latest_picks"],
                 "risk_overlay": oos_result["risk_overlay"],
-                "score": _overlay_candidate_score(train_result["metrics"], oos_result["metrics"], spec.target_max_dd),
+                "score": _overlay_candidate_score(train_result["metrics"], oos_result["metrics"], spec.target_max_dd, spec.target_cagr),
             }
         )
 
@@ -443,6 +626,231 @@ def _regime_window_mix(regime_frame: pd.DataFrame, start: str, end: str) -> Dict
     return {str(k): float(v) for k, v in counts.items()}
 
 
+def _normalize_mix(mix: Dict[str, float]) -> Dict[str, float]:
+    normalized = {label: float(mix.get(label, 0.0) or 0.0) for label in REGIME_ORDER}
+    total = sum(normalized.values())
+    if total <= 0:
+        return {label: 0.0 for label in REGIME_ORDER}
+    return {label: value / total for label, value in normalized.items()}
+
+
+def _mix_distance(left: Dict[str, float], right: Dict[str, float]) -> float:
+    left_norm = _normalize_mix(left)
+    right_norm = _normalize_mix(right)
+    return float(sum(abs(left_norm[label] - right_norm[label]) for label in REGIME_ORDER))
+
+
+def _build_mix_windows(
+    regime_frame: pd.DataFrame,
+    start: str,
+    end: str,
+    window_days: int,
+    step_days: int,
+    min_sample_days: int,
+) -> List[Dict[str, Any]]:
+    sample = _slice_frame(regime_frame, start, end)
+    if sample.empty:
+        return []
+
+    unique_days = sample["timestamp"].drop_duplicates().sort_values().tolist()
+    if len(unique_days) < max(1, int(min_sample_days)):
+        return []
+
+    windows: List[Dict[str, Any]] = []
+    seen_ranges: set[tuple[str, str]] = set()
+    end_positions = list(range(max(int(window_days), 1) - 1, len(unique_days), max(int(step_days), 1)))
+    if end_positions and end_positions[-1] != len(unique_days) - 1:
+        end_positions.append(len(unique_days) - 1)
+
+    for end_pos in end_positions:
+        start_pos = max(0, end_pos - max(int(window_days), 1) + 1)
+        window_days_slice = unique_days[start_pos : end_pos + 1]
+        if len(window_days_slice) < max(1, int(min_sample_days)):
+            continue
+        window_start = pd.to_datetime(window_days_slice[0], utc=True)
+        window_end = pd.to_datetime(window_days_slice[-1], utc=True)
+        range_key = (window_start.strftime("%Y-%m-%d"), window_end.strftime("%Y-%m-%d"))
+        if range_key in seen_ranges:
+            continue
+        seen_ranges.add(range_key)
+        window_sample = sample[(sample["timestamp"] >= window_start) & (sample["timestamp"] <= window_end)].copy()
+        mix = _normalize_mix(window_sample["regime"].value_counts(normalize=True).to_dict())
+        windows.append(
+            {
+                "window_label": f"{range_key[0]}__{range_key[1]}",
+                "start": range_key[0],
+                "end": range_key[1],
+                "sample_days": int(window_sample["timestamp"].nunique()),
+                "mix": mix,
+            }
+        )
+    return windows
+
+
+def _combo_cache_key(
+    selected_factors: List[str],
+    factor_weights: Dict[str, float],
+    start: str,
+    end: str,
+    top_n: int,
+    rebalance_every_n_days: int,
+    trade_filters: Dict[str, float] | None,
+    backtest_overrides: Dict[str, Any] | None,
+    regime_label: str | None,
+) -> str:
+    return json.dumps(
+        {
+            "factors": list(selected_factors),
+            "factor_weights": {str(k): float(v) for k, v in (factor_weights or {}).items()},
+            "start": start,
+            "end": end,
+            "top_n": int(top_n),
+            "rebalance_every_n_days": int(rebalance_every_n_days),
+            "trade_filters": trade_filters or {},
+            "backtest_overrides": backtest_overrides or {},
+            "regime_label": regime_label or "",
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _run_combo_backtest_cached(
+    cache: Dict[str, Dict[str, Any]],
+    score_frame_cache: Dict[str, Dict[str, Any]],
+    ohlcv: pd.DataFrame,
+    standardized_panel: pd.DataFrame,
+    raw_panel: pd.DataFrame | None,
+    selected_factors: List[str],
+    factor_weights: Dict[str, float],
+    start: str,
+    end: str,
+    top_n: int,
+    rebalance_every_n_days: int,
+    trade_filters: Dict[str, float] | None,
+    backtest_cfg: BacktestConfig,
+    backtest_overrides: Dict[str, Any] | None = None,
+    regime_frame: pd.DataFrame | None = None,
+    regime_label: str | None = None,
+) -> Dict[str, Any]:
+    key = _combo_cache_key(
+        selected_factors,
+        factor_weights,
+        start,
+        end,
+        top_n,
+        rebalance_every_n_days,
+        trade_filters,
+        backtest_overrides,
+        regime_label,
+    )
+    if key not in cache:
+        score_payload = _build_combo_score_frame_cached(
+            score_frame_cache,
+            standardized_panel,
+            raw_panel,
+            selected_factors,
+            factor_weights,
+            top_n,
+            rebalance_every_n_days,
+            trade_filters,
+        )
+        cache[key] = _run_backtest_from_score_frame(
+            ohlcv,
+            score_payload["score_frame"],
+            score_payload["filter_diagnostics"],
+            start,
+            end,
+            top_n,
+            rebalance_every_n_days,
+            backtest_cfg,
+            backtest_overrides=backtest_overrides,
+            regime_frame=regime_frame,
+            regime_label=regime_label,
+        )
+    return cache[key]
+
+
+def _window_candidate_score(metrics: Dict[str, Any], target_cagr: float, target_max_dd: float, corr_penalty: float = 0.0) -> tuple:
+    return _metric_priority(metrics, target_cagr, target_max_dd) + (-float(corr_penalty),)
+
+
+def _select_from_window_rows(
+    aggressive_rows: List[Dict[str, Any]],
+    conservative_rows: List[Dict[str, Any]],
+    spec: AlphaComboRegimeSwitchSpec,
+) -> Dict[str, Any]:
+    aggressive_best = sorted(
+        aggressive_rows,
+        key=lambda row: row["window_score"],
+        reverse=True,
+    )[0] if aggressive_rows else None
+    conservative_best = sorted(
+        conservative_rows,
+        key=lambda row: row["window_score"],
+        reverse=True,
+    )[0] if conservative_rows else None
+    selection = _select_variant(
+        aggressive_best,
+        conservative_best,
+        spec.max_drawdown_gap,
+        spec.target_cagr,
+        spec.target_max_dd,
+    )
+    return {
+        "aggressive": aggressive_best,
+        "conservative": conservative_best,
+        "selection": selection,
+    }
+
+
+def _summarize_oos_window_validation(rows: List[Dict[str, Any]], target_cagr: float, target_max_dd: float) -> Dict[str, Any]:
+    if not rows:
+        return {
+            "window_count": 0,
+            "cagr_hit_rate": 0.0,
+            "target_pass_rate": 0.0,
+            "avg_cagr": 0.0,
+            "avg_max_dd": 0.0,
+            "avg_sharpe": 0.0,
+            "avg_mix_distance": 0.0,
+        }
+
+    cagr_values = [float(row["realized_metrics"].get("cagr", 0.0) or 0.0) for row in rows]
+    max_dd_values = [abs(float(row["realized_metrics"].get("max_dd", 0.0) or 0.0)) for row in rows]
+    sharpe_values = [float(row["realized_metrics"].get("sharpe", 0.0) or 0.0) for row in rows]
+    mix_distances = [float(row["mix_distance"]) for row in rows]
+    cagr_hits = [value >= float(target_cagr) for value in cagr_values]
+    target_hits = [
+        cagr >= float(target_cagr) and max_dd <= float(target_max_dd)
+        for cagr, max_dd in zip(cagr_values, max_dd_values)
+    ]
+    return {
+        "window_count": len(rows),
+        "cagr_hit_rate": float(np.mean(cagr_hits)),
+        "target_pass_rate": float(np.mean(target_hits)),
+        "avg_cagr": float(np.mean(cagr_values)),
+        "median_cagr": float(np.median(cagr_values)),
+        "avg_max_dd": -float(np.mean(max_dd_values)),
+        "median_max_dd": -float(np.median(max_dd_values)),
+        "avg_sharpe": float(np.mean(sharpe_values)),
+        "avg_mix_distance": float(np.mean(mix_distances)),
+    }
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_safe(val) for key, val in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
+    if isinstance(value, np.floating):
+        converted = float(value)
+        return converted if np.isfinite(converted) else None
+    return value
+
+
 def _write_markdown_report(summary: Dict[str, Any], path: str) -> None:
     lines: List[str] = [
         "# Alpha Combo Regime Switch Report",
@@ -454,6 +862,7 @@ def _write_markdown_report(summary: Dict[str, Any], path: str) -> None:
         f"- OOS window: `{summary['spec']['oos_start']}` -> `{summary['spec']['oos_end']}`",
         f"- Max drawdown gap rule: `{summary['spec']['max_drawdown_gap']:.2%}`",
         f"- Overlay target max drawdown: `{summary['spec']['target_max_dd']:.2%}`",
+        f"- Target OOS CAGR floor: `{summary['spec']['target_cagr']:.2%}`",
         f"- Train regime mix: `{json.dumps(summary['train_regime_mix'], ensure_ascii=False)}`",
         f"- OOS regime mix: `{json.dumps(summary['oos_regime_mix'], ensure_ascii=False)}`",
         "",
@@ -494,11 +903,21 @@ def _write_markdown_report(summary: Dict[str, Any], path: str) -> None:
 
     lines.extend(
         [
+            "## Mixture-Aware Research",
+            "",
+            f"- Train mixture windows: `{summary.get('mixture_research', {}).get('train_window_count', 0)}`",
+            f"- OOS mixture windows: `{summary.get('mixture_research', {}).get('oos_window_count', 0)}`",
+            f"- Mixture candidate combos: `{summary.get('mixture_research', {}).get('combo_candidate_count', 0)}`",
+            f"- OOS window target pass rate: `{summary.get('mixture_research', {}).get('oos_validation_summary', {}).get('target_pass_rate', 0.0):.2%}`",
+            f"- OOS window avg CAGR: `{summary.get('mixture_research', {}).get('oos_validation_summary', {}).get('avg_cagr', 0.0):.2%}`",
+            f"- OOS window avg MaxDD: `{summary.get('mixture_research', {}).get('oos_validation_summary', {}).get('avg_max_dd', 0.0):.2%}`",
+            "",
             "## Notes",
             "",
-            "- 这里的 regime 研究用的是简单规则：先比较同一 regime 下激进版和低回撤版，再按 OOS 回撤差阈值决定选谁。",
+            "- 这里同时保留了单一 regime 对比和新的 mixture-aware 研究；后者以滚动窗口内的 regime mix 作为研究单元。",
             "- 组合级风控只搜索总敞口和组合回撤闸门，不继续默认收紧单票止损，尽量避免把结果调成样本内好看。",
-            "- 如果某个 regime 的样本天数太少，报告会直接退回到当前冻结模型，不会强行编一个新组合。",
+            "- mixture-aware 选择先只用 train 窗口生成原型，再拿 OOS 窗口做最近 mix 匹配验证，避免直接拿 OOS 反推组合。",
+            "- 如果某个 regime 或 mix 窗口样本天数太少，报告会直接退回到当前冻结模型，不会强行编一个新组合。",
             "",
         ]
     )
@@ -524,6 +943,8 @@ def run_alpha_combo_regime_switch(
     engine = build_factor_research_panel(ohlcv, universe_cfg, standardize_cfg)
     engine = _subset_engine(engine, spec.candidate_factors)
     regime_frame = _build_regime_frame(regime_ohlcv, regime_cfg)
+    backtest_cache: Dict[str, Dict[str, Any]] = {}
+    score_frame_cache: Dict[str, Dict[str, Any]] = {}
 
     aggressive_payload = _extract_model_inputs(_load_model(spec.aggressive_model_path), backtest_cfg)
     conservative_payload = _extract_model_inputs(_load_model(spec.conservative_model_path), backtest_cfg)
@@ -533,7 +954,9 @@ def run_alpha_combo_regime_switch(
         aggressive = {
             "factors": aggressive_payload["factors"],
             "factor_weights": aggressive_payload["factor_weights"],
-            "train_metrics": _run_combo_backtest(
+            "train_metrics": _run_combo_backtest_cached(
+                backtest_cache,
+                score_frame_cache,
                 ohlcv,
                 engine["standardized_panel"],
                 engine["raw_panel"],
@@ -549,7 +972,9 @@ def run_alpha_combo_regime_switch(
                 regime_frame=regime_frame,
                 regime_label=regime_label,
             )["metrics"],
-            "oos_metrics": _run_combo_backtest(
+            "oos_metrics": _run_combo_backtest_cached(
+                backtest_cache,
+                score_frame_cache,
                 ohlcv,
                 engine["standardized_panel"],
                 engine["raw_panel"],
@@ -569,7 +994,9 @@ def run_alpha_combo_regime_switch(
         conservative = {
             "factors": conservative_payload["factors"],
             "factor_weights": conservative_payload["factor_weights"],
-            "train_metrics": _run_combo_backtest(
+            "train_metrics": _run_combo_backtest_cached(
+                backtest_cache,
+                score_frame_cache,
                 ohlcv,
                 engine["standardized_panel"],
                 engine["raw_panel"],
@@ -585,7 +1012,9 @@ def run_alpha_combo_regime_switch(
                 regime_frame=regime_frame,
                 regime_label=regime_label,
             )["metrics"],
-            "oos_metrics": _run_combo_backtest(
+            "oos_metrics": _run_combo_backtest_cached(
+                backtest_cache,
+                score_frame_cache,
                 ohlcv,
                 engine["standardized_panel"],
                 engine["raw_panel"],
@@ -605,7 +1034,7 @@ def run_alpha_combo_regime_switch(
         frozen_comparison[regime_label] = {
             "aggressive": aggressive,
             "conservative": conservative,
-            "selection": _select_variant(aggressive, conservative, spec.max_drawdown_gap),
+            "selection": _select_variant(aggressive, conservative, spec.max_drawdown_gap, spec.target_cagr, spec.target_max_dd),
         }
 
     regime_models: Dict[str, Any] = {}
@@ -646,7 +1075,9 @@ def run_alpha_combo_regime_switch(
 
         aggressive_rows: List[Dict[str, Any]] = []
         for combo in combo_candidates["shortlisted_combinations"]:
-            train_result = _run_combo_backtest(
+            train_result = _run_combo_backtest_cached(
+                backtest_cache,
+                score_frame_cache,
                 ohlcv,
                 engine["standardized_panel"],
                 engine["raw_panel"],
@@ -661,7 +1092,9 @@ def run_alpha_combo_regime_switch(
                 regime_frame=regime_frame,
                 regime_label=regime_label,
             )
-            oos_result = _run_combo_backtest(
+            oos_result = _run_combo_backtest_cached(
+                backtest_cache,
+                score_frame_cache,
                 ohlcv,
                 engine["standardized_panel"],
                 engine["raw_panel"],
@@ -686,7 +1119,13 @@ def run_alpha_combo_regime_switch(
                     "oos_metrics": oos_result["metrics"],
                     "train_latest_picks": train_result["latest_picks"],
                     "oos_latest_picks": oos_result["latest_picks"],
-                    "stability_score": _combo_stability_score(train_result["metrics"], oos_result["metrics"], combo["max_abs_corr"]),
+                    "stability_score": _combo_stability_score(
+                        train_result["metrics"],
+                        oos_result["metrics"],
+                        combo["max_abs_corr"],
+                        spec.target_cagr,
+                        spec.target_max_dd,
+                    ),
                 }
             )
 
@@ -697,6 +1136,8 @@ def run_alpha_combo_regime_switch(
 
         if aggressive_best is not None:
             conservative_best = _search_overlay_variant(
+                backtest_cache,
+                score_frame_cache,
                 ohlcv,
                 engine["standardized_panel"],
                 engine["raw_panel"],
@@ -722,7 +1163,13 @@ def run_alpha_combo_regime_switch(
                 "risk_overrides": conservative_payload["backtest_overrides"],
             }
 
-        selection = _select_variant(aggressive_best, conservative_best, spec.max_drawdown_gap)
+        selection = _select_variant(
+            aggressive_best,
+            conservative_best,
+            spec.max_drawdown_gap,
+            spec.target_cagr,
+            spec.target_max_dd,
+        )
         regime_models[regime_label] = {
             "candidate_pool": candidate_pool["candidate_factors"],
             "dropped_factors": candidate_pool["dropped_factors"],
@@ -734,6 +1181,265 @@ def run_alpha_combo_regime_switch(
             "selection": selection,
             "fallback_used": fallback_used,
         }
+
+    overall_train_validation = _run_regime_factor_validation(
+        ohlcv,
+        engine["standardized_panel"],
+        None,
+        None,
+        spec.train_start,
+        spec.train_end,
+        test_cfg,
+    )
+    overall_oos_validation = _run_regime_factor_validation(
+        ohlcv,
+        engine["standardized_panel"],
+        None,
+        None,
+        spec.oos_start,
+        spec.oos_end,
+        test_cfg,
+    )
+    overall_pool = select_oriented_factor_pool(
+        overall_train_validation,
+        overall_oos_validation,
+        engine["factor_definitions"],
+        combo_cfg,
+    )
+    overall_candidate_names = [item["factor"] for item in overall_pool["candidate_factors"]]
+    overall_corr = compute_train_factor_correlation(
+        engine["standardized_panel"],
+        overall_candidate_names,
+        spec.train_start,
+        spec.train_end,
+    )
+    overall_combo_candidates = generate_low_correlation_combinations(
+        overall_pool["candidate_factors"],
+        engine["factor_definitions"],
+        overall_corr,
+        combo_cfg,
+    )
+
+    combo_catalog: List[Dict[str, Any]] = []
+    for combo in overall_combo_candidates["shortlisted_combinations"]:
+        aggressive_train = _run_combo_backtest_cached(
+            backtest_cache,
+            score_frame_cache,
+            ohlcv,
+            engine["standardized_panel"],
+            engine["raw_panel"],
+            combo["factors"],
+            combo["factor_weights"],
+            spec.train_start,
+            spec.train_end,
+            spec.top_n,
+            spec.rebalance_every_n_days,
+            spec.trade_filters,
+            backtest_cfg,
+        )
+        aggressive_oos = _run_combo_backtest_cached(
+            backtest_cache,
+            score_frame_cache,
+            ohlcv,
+            engine["standardized_panel"],
+            engine["raw_panel"],
+            combo["factors"],
+            combo["factor_weights"],
+            spec.oos_start,
+            spec.oos_end,
+            spec.top_n,
+            spec.rebalance_every_n_days,
+            spec.trade_filters,
+            backtest_cfg,
+        )
+        aggressive_row = {
+            "factors": combo["factors"],
+            "factor_weights": combo["factor_weights"],
+            "max_abs_corr": combo["max_abs_corr"],
+            "avg_abs_corr": combo["avg_abs_corr"],
+            "train_metrics": aggressive_train["metrics"],
+            "oos_metrics": aggressive_oos["metrics"],
+            "train_latest_picks": aggressive_train["latest_picks"],
+            "oos_latest_picks": aggressive_oos["latest_picks"],
+        }
+        conservative_row = _search_overlay_variant(
+            backtest_cache,
+            score_frame_cache,
+            ohlcv,
+            engine["standardized_panel"],
+            engine["raw_panel"],
+            None,
+            None,
+            combo["factors"],
+            combo["factor_weights"],
+            spec,
+            backtest_cfg,
+        )
+        combo_catalog.append(
+            {
+                "aggressive": aggressive_row,
+                "conservative": conservative_row,
+            }
+        )
+
+    train_mix_windows = _build_mix_windows(
+        regime_frame,
+        spec.train_start,
+        spec.train_end,
+        spec.mix_window_days,
+        spec.mix_step_days,
+        spec.min_mix_sample_days,
+    )
+    oos_mix_windows = _build_mix_windows(
+        regime_frame,
+        spec.oos_start,
+        spec.oos_end,
+        spec.mix_window_days,
+        spec.mix_step_days,
+        spec.min_mix_sample_days,
+    )
+
+    mixture_library: List[Dict[str, Any]] = []
+    for window in train_mix_windows:
+        aggressive_rows: List[Dict[str, Any]] = []
+        conservative_rows: List[Dict[str, Any]] = []
+        for catalog in combo_catalog:
+            aggressive_source = catalog["aggressive"]
+            aggressive_result = _run_combo_backtest_cached(
+                backtest_cache,
+                score_frame_cache,
+                ohlcv,
+                engine["standardized_panel"],
+                engine["raw_panel"],
+                aggressive_source["factors"],
+                aggressive_source["factor_weights"],
+                window["start"],
+                window["end"],
+                spec.top_n,
+                spec.rebalance_every_n_days,
+                spec.trade_filters,
+                backtest_cfg,
+            )
+            aggressive_rows.append(
+                {
+                    **aggressive_source,
+                    "oos_metrics": aggressive_result["metrics"],
+                    "window_metrics": aggressive_result["metrics"],
+                    "window_score": _window_candidate_score(
+                        aggressive_result["metrics"],
+                        spec.target_cagr,
+                        spec.target_max_dd,
+                        aggressive_source["max_abs_corr"],
+                    ),
+                }
+            )
+            conservative_source = catalog["conservative"]
+            if conservative_source is None:
+                continue
+            conservative_result = _run_combo_backtest_cached(
+                backtest_cache,
+                score_frame_cache,
+                ohlcv,
+                engine["standardized_panel"],
+                engine["raw_panel"],
+                conservative_source["factors"],
+                conservative_source["factor_weights"],
+                window["start"],
+                window["end"],
+                spec.top_n,
+                spec.rebalance_every_n_days,
+                spec.trade_filters,
+                backtest_cfg,
+                backtest_overrides=conservative_source.get("risk_overrides"),
+            )
+            conservative_rows.append(
+                {
+                    **conservative_source,
+                    "oos_metrics": conservative_result["metrics"],
+                    "window_metrics": conservative_result["metrics"],
+                    "window_score": _window_candidate_score(
+                        conservative_result["metrics"],
+                        spec.target_cagr,
+                        spec.target_max_dd,
+                    ),
+                }
+            )
+        selected = _select_from_window_rows(aggressive_rows, conservative_rows, spec)
+        mixture_library.append(
+            {
+                "window_label": window["window_label"],
+                "start": window["start"],
+                "end": window["end"],
+                "sample_days": window["sample_days"],
+                "mix": window["mix"],
+                "aggressive": selected["aggressive"],
+                "conservative": selected["conservative"],
+                "selection": selected["selection"],
+            }
+        )
+
+    oos_window_validation: List[Dict[str, Any]] = []
+    for window in oos_mix_windows:
+        if not mixture_library:
+            break
+        matched = min(
+            mixture_library,
+            key=lambda row: (_mix_distance(window["mix"], row["mix"]), -int(row.get("sample_days", 0))),
+        )
+        selected_variant = matched["selection"].get("selected_variant", "aggressive")
+        selected_model = matched.get(selected_variant) or matched.get("aggressive") or matched.get("conservative")
+        if selected_model is None:
+            continue
+        realized = _run_combo_backtest_cached(
+            backtest_cache,
+            score_frame_cache,
+            ohlcv,
+            engine["standardized_panel"],
+            engine["raw_panel"],
+            selected_model["factors"],
+            selected_model["factor_weights"],
+            window["start"],
+            window["end"],
+            spec.top_n,
+            spec.rebalance_every_n_days,
+            spec.trade_filters,
+            backtest_cfg,
+            backtest_overrides=selected_model.get("risk_overrides"),
+        )
+        oos_window_validation.append(
+            {
+                "window_label": window["window_label"],
+                "start": window["start"],
+                "end": window["end"],
+                "mix": window["mix"],
+                "sample_days": window["sample_days"],
+                "matched_train_window": matched["window_label"],
+                "mix_distance": _mix_distance(window["mix"], matched["mix"]),
+                "selected_variant": selected_variant,
+                "selected_factors": selected_model["factors"],
+                "selected_factor_weights": selected_model["factor_weights"],
+                "risk_overrides": selected_model.get("risk_overrides", {}),
+                "realized_metrics": realized["metrics"],
+            }
+        )
+
+    mixture_research = {
+        "mix_window_days": int(spec.mix_window_days),
+        "mix_step_days": int(spec.mix_step_days),
+        "min_mix_sample_days": int(spec.min_mix_sample_days),
+        "train_window_count": len(train_mix_windows),
+        "oos_window_count": len(oos_mix_windows),
+        "candidate_pool": overall_pool["candidate_factors"],
+        "dropped_factors": overall_pool["dropped_factors"],
+        "combo_candidate_count": len(combo_catalog),
+        "mixture_library": mixture_library,
+        "oos_window_validation": oos_window_validation,
+        "oos_validation_summary": _summarize_oos_window_validation(
+            oos_window_validation,
+            spec.target_cagr,
+            spec.target_max_dd,
+        ),
+    }
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     json_path = os.path.join(REPORT_DIR, f"alpha_combo_regime_switch_{stamp}.json")
@@ -748,6 +1454,7 @@ def run_alpha_combo_regime_switch(
         "oos_regime_mix": _regime_window_mix(regime_frame, spec.oos_start, spec.oos_end),
         "frozen_model_comparison": frozen_comparison,
         "regime_models": regime_models,
+        "mixture_research": mixture_research,
         "report_files": {
             "json": json_path,
             "markdown": md_path,
@@ -756,19 +1463,20 @@ def run_alpha_combo_regime_switch(
     }
 
     with open(json_path, "w", encoding="utf-8") as handle:
-        json.dump(summary, handle, ensure_ascii=False, indent=2)
+        json.dump(_json_safe(summary), handle, ensure_ascii=False, indent=2)
     _write_markdown_report(summary, md_path)
 
     with open(frozen_path, "w", encoding="utf-8") as handle:
         json.dump(
-            {
+            _json_safe({
                 "generated_at_utc": summary["generated_at_utc"],
                 "spec": summary["spec"],
                 "train_regime_mix": summary["train_regime_mix"],
                 "oos_regime_mix": summary["oos_regime_mix"],
                 "regime_models": summary["regime_models"],
+                "mixture_research": summary["mixture_research"],
                 "report_files": summary["report_files"],
-            },
+            }),
             handle,
             ensure_ascii=False,
             indent=2,
