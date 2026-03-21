@@ -19,6 +19,12 @@ cd web
 python server.py
 ```
 
+Windows 新手更建议直接双击：
+
+```text
+web/start_workbench.bat
+```
+
 默认地址：
 
 ```text

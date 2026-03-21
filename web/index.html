@@ -30,6 +30,9 @@
             <span id="health-text">连接中...</span>
           </div>
           <p class="muted" id="python-badge">检测 Python...</p>
+          <div class="startup-help" id="startup-help">
+            如果这里显示“服务未连接”，请先双击 `web/start_workbench.bat`，再等浏览器自动打开。
+          </div>
         </div>
       </aside>
 
@@ -37,9 +40,9 @@
         <section class="hero">
           <div class="hero-copy-block">
             <p class="eyebrow">Friend-Friendly Onboarding</p>
-            <h2>web端</h2>
+            <h2>像用普通网站一样做量化研究</h2>
             <p class="hero-copy">
-              你好
+              你不需要懂代码，也不需要会终端。先看历史结果，再点推荐流程，最后再尝试改参数。
             </p>
             <div class="hero-badges">
               <span class="hero-badge">Localhost only</span>
@@ -54,6 +57,16 @@
         </section>
 
         <section class="content-section active" id="section-overview">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Start Here</p>
+                <h3>给新手的三个入口</h3>
+              </div>
+            </div>
+            <div class="quick-actions" id="beginner-guide"></div>
+          </article>
+
           <div class="grid-two">
             <article class="panel">
               <div class="panel-header">
@@ -75,6 +88,17 @@
               <div class="quick-actions" id="quick-actions"></div>
             </article>
           </div>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Readiness</p>
+                <h3>本地就绪检查</h3>
+              </div>
+            </div>
+            <div class="summary-grid" id="readiness-grid"></div>
+            <div class="note-box" id="readiness-notes"></div>
+          </article>
 
           <div class="grid-two">
             <article class="panel">
@@ -111,6 +135,18 @@
         </section>
 
         <section class="content-section" id="section-lab">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Beginner Tips</p>
+                <h3>新手建议</h3>
+              </div>
+            </div>
+            <div class="note-box" id="lab-help">
+              第一次使用，建议只点“完整因子研究”或“找低相关组合”。如果看不懂参数，先保留默认值。
+            </div>
+          </article>
+
           <div class="grid-lab">
             <article class="panel">
               <div class="panel-header">
@@ -131,6 +167,7 @@
               </div>
               <form id="workflow-form">
                 <div id="workflow-description" class="lead"></div>
+                <div id="workflow-presets" class="preset-row"></div>
                 <div id="form-fields" class="form-grid"></div>
                 <div class="command-preview">
                   <p class="panel-kicker">Command Preview</p>

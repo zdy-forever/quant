@@ -224,6 +224,56 @@ textarea {
   backdrop-filter: blur(12px);
 }
 
+.startup-help {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 159, 10, 0.08);
+  color: var(--ink-soft);
+  line-height: 1.55;
+  font-size: 0.92rem;
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0 8px;
+}
+
+.preset-btn {
+  border: 1px solid rgba(0, 113, 227, 0.12);
+  border-radius: 999px;
+  background: rgba(0, 113, 227, 0.05);
+  color: #0a5ec2;
+  padding: 9px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.preset-btn:hover {
+  background: rgba(0, 113, 227, 0.1);
+}
+
+.helper-card {
+  padding: 18px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 249, 252, 0.78));
+  border: 1px solid rgba(17, 17, 17, 0.06);
+}
+
+.helper-card strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 1.02rem;
+}
+
+.helper-card p {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+
 .ghost-btn,
 .accent-btn {
   padding: 13px 20px;
@@ -479,6 +529,28 @@ textarea {
   margin-top: 8px;
   font-size: 1.2rem;
   font-weight: 700;
+}
+
+.summary-card.ready {
+  background: linear-gradient(180deg, rgba(243, 251, 248, 0.98), rgba(255, 255, 255, 0.9));
+}
+
+.summary-card.missing {
+  background: linear-gradient(180deg, rgba(255, 244, 240, 0.96), rgba(255, 255, 255, 0.92));
+}
+
+.summary-card.optional,
+.summary-card.cold,
+.summary-card.empty {
+  background: linear-gradient(180deg, rgba(255, 249, 239, 0.96), rgba(255, 255, 255, 0.92));
+}
+
+.summary-card .caption {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  line-height: 1.45;
 }
 
 .split-grid {

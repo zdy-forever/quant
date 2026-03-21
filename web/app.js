@@ -1,5 +1,7 @@
 const state = {
   meta: null,
+  readiness: null,
+  connectionError: null,
   reports: [],
   selectedReport: null,
   selectedWorkflow: "factor-pipeline",
@@ -7,6 +9,8 @@ const state = {
   tasks: [],
   activeTaskId: null,
 };
+
+const STORAGE_KEY = "quant_local_workbench_state_v1";
 
 const DEFAULTS = {
   train_start: "2016-01-01",
@@ -227,6 +231,71 @@ const WORKFLOWS = {
   },
 };
 
+const WORKFLOW_PRESETS = {
+  "factor-pipeline": [
+    {
+      label: "推荐默认",
+      values: {},
+    },
+    {
+      label: "短线反转聚焦",
+      values: {
+        candidate_factors: ["reversal_3", "reversal_5", "true_range_pct_1", "low_volatility_20"],
+      },
+    },
+  ],
+  "alpha-combo-search": [
+    {
+      label: "低相关默认",
+      values: {},
+    },
+    {
+      label: "更聚焦反转",
+      values: {
+        candidate_factors: ["reversal_5", "reversal_3", "true_range_pct_1", "low_volatility_20", "trend_pullback_20_5"],
+      },
+    },
+  ],
+  "alpha-combo-risk-search": [
+    {
+      label: "回撤 15%",
+      values: {
+        target_max_dd: 0.15,
+        gross_exposure_grid: "0.3,0.35,0.4",
+      },
+    },
+    {
+      label: "更保守",
+      values: {
+        target_max_dd: 0.1,
+        gross_exposure_grid: "0.2,0.25,0.3",
+        stop_loss_grid: "0.015,0.02,0.025",
+      },
+    },
+  ],
+  train: [
+    {
+      label: "基线对照",
+      values: {},
+    },
+  ],
+};
+
+const BEGINNER_GUIDE = [
+  {
+    title: "1. 先看历史结果",
+    body: "如果只是想先看看这个系统能做什么，先去“报告库”看已经跑好的结果，不用改任何参数。",
+  },
+  {
+    title: "2. 跑推荐默认",
+    body: "第一次真正使用，建议直接运行“完整因子研究”，并保持默认参数。",
+  },
+  {
+    title: "3. 再改参数",
+    body: "只有当你已经看懂报告里的表现和回撤，再开始勾选因子或修改参数。",
+  },
+];
+
 function $(selector) {
   return document.querySelector(selector);
 }
@@ -284,9 +353,88 @@ function getSelectedWorkflow() {
   return WORKFLOWS[state.selectedWorkflow];
 }
 
+function saveLocalState() {
+  const payload = {
+    selectedWorkflow: state.selectedWorkflow,
+    formValues: state.formValues,
+  };
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+}
+
+function loadLocalState() {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const payload = JSON.parse(raw);
+    if (payload.selectedWorkflow && WORKFLOWS[payload.selectedWorkflow]) {
+      state.selectedWorkflow = payload.selectedWorkflow;
+    }
+    if (payload.formValues && typeof payload.formValues === "object") {
+      state.formValues = payload.formValues;
+    }
+  } catch (error) {
+    // ignore invalid local state
+  }
+}
+
 function switchSection(section) {
   document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.section === section));
   document.querySelectorAll(".content-section").forEach((panel) => panel.classList.toggle("active", panel.id === `section-${section}`));
+}
+
+function setStartupHelp(online) {
+  const el = $("#startup-help");
+  if (!el) return;
+  el.style.display = online ? "none" : "block";
+}
+
+function renderBeginnerGuide() {
+  $("#beginner-guide").innerHTML = BEGINNER_GUIDE.map(
+    (item) => `
+      <div class="helper-card">
+        <strong>${escapeHtml(item.title)}</strong>
+        <p>${escapeHtml(item.body)}</p>
+      </div>
+    `,
+  ).join("");
+}
+
+function renderDisconnectedExperience(message = "") {
+  state.connectionError = message || "本地服务没有连接成功。";
+  setStartupHelp(false);
+  $("#meta-list").innerHTML = `
+    <div class="helper-card">
+      <strong>当前还没连上本地服务</strong>
+      <p>请不要直接双击打开 HTML 文件。请先双击 <code>web/start_workbench.bat</code>，再等浏览器自动打开。</p>
+    </div>
+  `;
+  $("#quick-actions").innerHTML = `
+    <div class="helper-card">
+      <strong>最简单的开始方式</strong>
+      <p>1. 关闭当前网页 2. 双击 <code>start_workbench.bat</code> 3. 等浏览器自动打开 4. 先看“报告库”。</p>
+    </div>
+  `;
+  $("#readiness-grid").innerHTML = `
+    <div class="summary-card missing">
+      <div class="panel-kicker">Service</div>
+      <span class="value">offline</span>
+      <span class="caption">${escapeHtml(message || "页面暂时拿不到本地数据。")}</span>
+    </div>
+  `;
+  $("#readiness-notes").innerHTML = `
+    <div><p class="panel-kicker">怎么解决</p><div>请先启动本地服务，不要把这个页面当成静态网页直接打开。</div></div>
+  `;
+  $("#factor-wall").innerHTML = `<div class="helper-card"><strong>这里以后会显示可选因子</strong><p>服务连接成功后，这里会自动列出可勾选的因子。</p></div>`;
+  $("#strategy-wall").innerHTML = `<div class="helper-card"><strong>这里以后会显示策略</strong><p>服务连接成功后，这里会自动列出可用策略。</p></div>`;
+  $("#recent-reports").innerHTML = `<div class="helper-card"><strong>这里以后会显示最新报告</strong><p>如果你已经跑过研究，连接成功后会自动出现。</p></div>`;
+  $("#workflow-list").innerHTML = `<div class="helper-card"><strong>研究流程还没加载</strong><p>等本地服务连接成功后，这里会显示推荐流程。</p></div>`;
+  $("#workflow-presets").innerHTML = "";
+  $("#form-fields").innerHTML = `<div class="helper-card"><strong>参数面板暂不可用</strong><p>连接上服务以后，这里会显示可以直接点选的参数。</p></div>`;
+  $("#command-preview-text").textContent = "请先启动本地服务。";
+  $("#task-list").innerHTML = `<div class="helper-card"><strong>任务中心暂不可用</strong><p>连接成功后，这里会显示运行中的任务和日志。</p></div>`;
+  $("#task-detail").innerHTML = `<div class="helper-card"><strong>还没有任务</strong><p>先把本地服务启动起来，再提交第一轮研究。</p></div>`;
+  $("#report-list").innerHTML = `<div class="helper-card"><strong>报告库未连接</strong><p>连接成功后，这里会自动列出已生成的报告。</p></div>`;
+  $("#report-content").innerHTML = `<div class="helper-card"><strong>报告查看区</strong><p>左侧有报告时，点一下就会在这里展开摘要。</p></div>`;
 }
 
 function renderNav() {
@@ -301,6 +449,8 @@ function renderOverview() {
     $("#meta-list").innerHTML = `<p class="empty-state">正在读取环境信息...</p>`;
     return;
   }
+
+  renderBeginnerGuide();
 
   const rows = [
     ["仓库目录", meta.repo_dir],
@@ -367,16 +517,57 @@ function renderOverview() {
   });
 }
 
-function renderWorkflowList() {
-  $("#workflow-list").innerHTML = Object.entries(WORKFLOWS)
+function renderReadiness() {
+  const readiness = state.readiness;
+  if (!readiness) {
+    $("#readiness-grid").innerHTML = `<p class="empty-state">正在检查本地环境...</p>`;
+    $("#readiness-notes").innerHTML = `<p class="empty-state">稍后会显示建议。</p>`;
+    return;
+  }
+
+  $("#readiness-grid").innerHTML = readiness.checks
     .map(
-      ([key, workflow]) => `
-        <button class="workflow-card ${state.selectedWorkflow === key ? "active" : ""}" data-workflow="${key}">
-          <p class="panel-kicker">${escapeHtml(workflow.label)}</p>
-          <div>${escapeHtml(workflow.description)}</div>
-        </button>
+      (item) => `
+        <div class="summary-card ${escapeHtml(item.status)}">
+          <div class="panel-kicker">${escapeHtml(item.label)}</div>
+          <span class="value">${escapeHtml(item.status)}</span>
+          <span class="caption">${escapeHtml(item.detail)}</span>
+        </div>
       `,
     )
+    .join("");
+
+  const blockers = readiness.blockers?.length
+    ? `<div><p class="panel-kicker">需要先补齐</p><div>${readiness.blockers.map((item) => `<div>${escapeHtml(item)}</div>`).join("")}</div></div>`
+    : `<div><p class="panel-kicker">阻塞项</p><div>没有硬性阻塞项，可以直接用 Web 端跑本地研究。</div></div>`;
+
+  const nudges = readiness.nudges?.length
+    ? `<div><p class="panel-kicker">优化建议</p><div>${readiness.nudges.map((item) => `<div>${escapeHtml(item)}</div>`).join("")}</div></div>`
+    : `<div><p class="panel-kicker">优化建议</p><div>当前配置已经比较完整。</div></div>`;
+
+  $("#readiness-notes").innerHTML = `${blockers}${nudges}`;
+}
+
+function renderWorkflowList() {
+  const beginnerKeys = ["factor-pipeline", "alpha-combo-search", "alpha-combo-risk-search"];
+  const ordered = [
+    ...beginnerKeys.filter((key) => WORKFLOWS[key]).map((key) => [key, WORKFLOWS[key]]),
+    ...Object.entries(WORKFLOWS).filter(([key]) => !beginnerKeys.includes(key)),
+  ];
+
+  $("#workflow-list").innerHTML = ordered
+    .map(([key, workflow], index) => {
+      const recommended = beginnerKeys.includes(key);
+      const divider = index === beginnerKeys.length ? `<div class="helper-card"><strong>更多高级流程</strong><p>如果你还不熟悉量化研究，下面这些先不用碰。</p></div>` : "";
+      return `
+        ${divider}
+        <button class="workflow-card ${state.selectedWorkflow === key ? "active" : ""}" data-workflow="${key}">
+          <p class="panel-kicker">${recommended ? "Recommended" : "Advanced"}</p>
+          <div><strong>${escapeHtml(workflow.label)}</strong></div>
+          <div class="muted">${escapeHtml(workflow.description)}</div>
+        </button>
+      `;
+    })
     .join("");
 
   document.querySelectorAll("[data-workflow]").forEach((button) => {
@@ -461,12 +652,29 @@ function handleFieldChange(event) {
   }
 
   $("#command-preview-text").textContent = buildCommandPreview();
+  saveLocalState();
+}
+
+function applyPreset(values) {
+  const next = { ...state.formValues };
+  Object.entries(values).forEach(([key, value]) => {
+    next[key] = value;
+  });
+  state.formValues = next;
+  renderWorkflowForm();
+  saveLocalState();
 }
 
 function renderWorkflowForm() {
   const workflow = getSelectedWorkflow();
   $("#form-title").textContent = workflow.label;
   $("#workflow-description").textContent = workflow.description;
+  const presets = WORKFLOW_PRESETS[state.selectedWorkflow] || [];
+  $("#workflow-presets").innerHTML = presets.length
+    ? presets
+        .map((preset, index) => `<button type="button" class="preset-btn" data-preset-index="${index}">${escapeHtml(preset.label)}</button>`)
+        .join("")
+    : "";
   $("#form-fields").innerHTML = workflow.fields
     .map((field) => {
       if (field.type === "multi-factor") return renderCheckboxField(field, state.meta?.factors || []);
@@ -510,6 +718,13 @@ function renderWorkflowForm() {
 
   $("#command-preview-text").textContent = buildCommandPreview();
 
+  $("#workflow-presets").querySelectorAll("[data-preset-index]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const preset = presets[Number(button.dataset.presetIndex)];
+      applyPreset(preset.values || {});
+    });
+  });
+
   $("#form-fields").querySelectorAll("[data-key]").forEach((input) => {
     input.addEventListener("input", handleFieldChange);
     input.addEventListener("change", handleFieldChange);
@@ -517,10 +732,14 @@ function renderWorkflowForm() {
 }
 
 function selectWorkflow(workflowKey) {
+  const previousWorkflow = state.selectedWorkflow;
   state.selectedWorkflow = workflowKey;
-  resetWorkflowValues(workflowKey);
+  if (!state.formValues || !Object.keys(state.formValues).length || previousWorkflow !== workflowKey) {
+    resetWorkflowValues(workflowKey);
+  }
   renderWorkflowList();
   renderWorkflowForm();
+  saveLocalState();
 }
 
 function renderTasks() {
@@ -560,6 +779,9 @@ function renderTaskDetail() {
   const reportLinks = (task.new_reports || [])
     .map((name) => `<button class="ghost-btn small" data-open-report="${escapeHtml(name)}">${escapeHtml(name)}</button>`)
     .join("");
+  const cancelButton = task.can_cancel
+    ? `<button class="ghost-btn small" data-cancel-task="${escapeHtml(task.id)}">停止任务</button>`
+    : "";
 
   $("#task-detail").innerHTML = `
     <div class="section-stack">
@@ -572,6 +794,7 @@ function renderTaskDetail() {
         <p class="panel-kicker">Command</p>
         <pre class="raw-json">${escapeHtml(task.command)}</pre>
       </div>
+      ${cancelButton ? `<div>${cancelButton}</div>` : ""}
       ${reportLinks ? `<div><p class="panel-kicker">New Reports</p><div class="pill-row">${reportLinks}</div></div>` : ""}
       <div>
         <p class="panel-kicker">Log</p>
@@ -591,6 +814,12 @@ function renderTaskDetail() {
     button.addEventListener("click", async () => {
       switchSection("reports");
       await selectReport(button.dataset.openReport);
+    });
+  });
+
+  $("#task-detail").querySelectorAll("[data-cancel-task]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await cancelTask(button.dataset.cancelTask);
     });
   });
 }
@@ -887,6 +1116,13 @@ async function fetchMeta() {
   renderWorkflowForm();
 }
 
+async function fetchReadiness() {
+  const response = await fetch("/api/readiness");
+  const payload = await response.json();
+  state.readiness = payload;
+  renderReadiness();
+}
+
 async function fetchReports() {
   const response = await fetch("/api/reports");
   const payload = await response.json();
@@ -903,6 +1139,37 @@ async function fetchTasks() {
   renderTasks();
 }
 
+async function refreshTasksSafely() {
+  try {
+    if (!(await checkHealth())) return;
+    await fetchTasks();
+  } catch (error) {
+    // keep UI calm for novices
+  }
+}
+
+async function refreshReportsSafely() {
+  try {
+    if (!(await checkHealth())) return;
+    await fetchReports();
+  } catch (error) {
+    // keep UI calm for novices
+  }
+}
+
+async function cancelTask(taskId) {
+  const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/cancel`, {
+    method: "POST",
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    alert(payload.error || "停止任务失败");
+    return;
+  }
+  state.activeTaskId = payload.id;
+  await fetchTasks();
+}
+
 async function checkHealth() {
   try {
     const response = await fetch("/api/health");
@@ -910,13 +1177,17 @@ async function checkHealth() {
     if (payload.ok) {
       $("#health-dot").className = "status-dot online";
       $("#health-text").textContent = "本地服务在线";
-      return;
+      setStartupHelp(true);
+      state.connectionError = null;
+      return true;
     }
   } catch (error) {
-    // ignore
+    state.connectionError = error?.message || "health check failed";
   }
   $("#health-dot").className = "status-dot offline";
   $("#health-text").textContent = "服务未连接";
+  setStartupHelp(false);
+  return false;
 }
 
 async function submitTask(event) {
@@ -948,6 +1219,7 @@ function bindActions() {
   $("#reset-form").addEventListener("click", () => {
     resetWorkflowValues(state.selectedWorkflow);
     renderWorkflowForm();
+    saveLocalState();
   });
   $("#refresh-all").addEventListener("click", bootstrapData);
   $("#open-default-workflow").addEventListener("click", () => {
@@ -958,19 +1230,32 @@ function bindActions() {
 }
 
 async function bootstrapData() {
-  await checkHealth();
-  await fetchMeta();
-  await fetchReports();
-  await fetchTasks();
+  const online = await checkHealth();
+  if (!online) {
+    renderBeginnerGuide();
+    renderDisconnectedExperience("还没有连上本地服务。");
+    return;
+  }
+
+  try {
+    await fetchMeta();
+    await fetchReadiness();
+    await fetchReports();
+    await fetchTasks();
+  } catch (error) {
+    renderDisconnectedExperience(error?.message || "本地服务已启动，但页面读取数据失败。");
+  }
 }
 
 async function init() {
+  loadLocalState();
   renderNav();
   bindActions();
-  resetWorkflowValues(state.selectedWorkflow);
+  renderBeginnerGuide();
+  if (!state.formValues || !Object.keys(state.formValues).length) resetWorkflowValues(state.selectedWorkflow);
   await bootstrapData();
-  setInterval(fetchTasks, 2500);
-  setInterval(fetchReports, 12000);
+  setInterval(refreshTasksSafely, 2500);
+  setInterval(refreshReportsSafely, 12000);
 }
 
 init();

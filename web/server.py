@@ -19,6 +19,11 @@ WEB_DIR = Path(__file__).resolve().parent
 REPO_DIR = WEB_DIR.parent
 REPORT_DIR = REPO_DIR / "artifacts" / "reports"
 STRATEGY_DIR = REPO_DIR / "strategy"
+SELECTED_FACTOR_DIR = REPO_DIR / "artifacts" / "selected_factors"
+CACHE_DIR = REPO_DIR / "artifacts" / "cache" / "ohlcv"
+ENV_FILE = REPO_DIR / ".env"
+RUNTIME_CONFIG = REPO_DIR / "config" / "runtime.yaml"
+SYMBOLS_FILE = REPO_DIR / "config" / "symbols.txt"
 DEFAULT_PORT = 8765
 
 DEFAULT_FACTORS = [
@@ -317,6 +322,111 @@ def discover_strategy_names() -> list[str]:
     return names
 
 
+def read_env_keys() -> set[str]:
+    if not ENV_FILE.exists():
+        return set()
+    keys: set[str] = set()
+    try:
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            clean = line.strip()
+            if not clean or clean.startswith("#") or "=" not in clean:
+                continue
+            key = clean.split("=", 1)[0].strip()
+            if key:
+                keys.add(key)
+    except OSError:
+        return set()
+    return keys
+
+
+def count_symbols() -> int:
+    if not SYMBOLS_FILE.exists():
+        return 0
+    count = 0
+    try:
+        for line in SYMBOLS_FILE.read_text(encoding="utf-8").splitlines():
+            clean = line.strip()
+            if clean and not clean.startswith("#"):
+                count += 1
+    except OSError:
+        return 0
+    return count
+
+
+def build_readiness_payload() -> dict[str, Any]:
+    env_keys = read_env_keys()
+    alpaca_ready = {"ALPACA_API_KEY", "ALPACA_API_SECRET"}.issubset(env_keys) or {
+        "ALPACA_PAPER1_API_KEY_ID",
+        "ALPACA_PAPER1_API_SECRET_KEY",
+    }.issubset(env_keys)
+    email_ready = {
+        "EMAIL_SENDER",
+        "EMAIL_PASSWORD",
+        "EMAIL_RECEIVER",
+        "SMTP_HOST",
+        "SMTP_PORT",
+    }.issubset(env_keys)
+    runtime_ready = RUNTIME_CONFIG.exists()
+    report_count = len(list_reports())
+    cache_count = len(list(CACHE_DIR.glob("*.csv"))) if CACHE_DIR.exists() else 0
+    frozen_models = len(list(SELECTED_FACTOR_DIR.glob("*.json"))) if SELECTED_FACTOR_DIR.exists() else 0
+    symbols_count = count_symbols()
+
+    checks = [
+        {
+            "key": "alpaca",
+            "label": "Alpaca 凭证",
+            "status": "ready" if alpaca_ready else "missing",
+            "detail": "已检测到 paper 凭证变量" if alpaca_ready else "缺少 ALPACA_API_KEY / ALPACA_API_SECRET",
+        },
+        {
+            "key": "email",
+            "label": "邮件通知",
+            "status": "ready" if email_ready else "optional",
+            "detail": "自动邮件通知已基本就绪" if email_ready else "未配全邮箱参数，不影响本地回测",
+        },
+        {
+            "key": "runtime",
+            "label": "运行期配置",
+            "status": "ready" if runtime_ready else "missing",
+            "detail": "runtime.yaml 已存在" if runtime_ready else "缺少 config/runtime.yaml",
+        },
+        {
+            "key": "symbols",
+            "label": "股票池",
+            "status": "ready" if symbols_count > 0 else "missing",
+            "detail": f"当前股票池数量: {symbols_count}",
+        },
+        {
+            "key": "reports",
+            "label": "历史报告",
+            "status": "ready" if report_count > 0 else "empty",
+            "detail": f"可读取报告数: {report_count}",
+        },
+        {
+            "key": "cache",
+            "label": "本地缓存",
+            "status": "ready" if cache_count > 0 else "cold",
+            "detail": f"OHLCV 缓存文件数: {cache_count}",
+        },
+        {
+            "key": "models",
+            "label": "冻结模型",
+            "status": "ready" if frozen_models > 0 else "empty",
+            "detail": f"selected_factors / 模型文件数: {frozen_models}",
+        },
+    ]
+
+    blockers = [item["detail"] for item in checks if item["status"] == "missing"]
+    nudges = [item["detail"] for item in checks if item["status"] in {"optional", "cold", "empty"}]
+    return {
+        "checks": checks,
+        "blockers": blockers,
+        "nudges": nudges,
+        "env_file_exists": ENV_FILE.exists(),
+    }
+
+
 def task_snapshot(task: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": task["id"],
@@ -331,6 +441,7 @@ def task_snapshot(task: dict[str, Any]) -> dict[str, Any]:
         "result_json": task.get("result_json"),
         "new_reports": task.get("new_reports", []),
         "return_code": task.get("return_code"),
+        "can_cancel": bool(task.get("process")) and task.get("status") in {"queued", "running", "cancelling"},
     }
 
 
@@ -367,6 +478,9 @@ def run_task(task_id: str) -> None:
         bufsize=1,
         env=process_env,
     )
+    with TASK_LOCK:
+        task = TASKS[task_id]
+        task["process"] = process
 
     output_lines: list[str] = []
     assert process.stdout is not None
@@ -386,7 +500,11 @@ def run_task(task_id: str) -> None:
         task["log"] = output_text[-120000:]
         task["result_json"] = parse_json_maybe(output_text)
         task["new_reports"] = latest_reports_since(start_ts)
-        task["status"] = "success" if return_code == 0 else "failed"
+        task["process"] = None
+        if task.get("cancellation_requested"):
+            task["status"] = "cancelled"
+        else:
+            task["status"] = "success" if return_code == 0 else "failed"
 
 
 def create_task(workflow: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -406,6 +524,8 @@ def create_task(workflow: str, params: dict[str, Any]) -> dict[str, Any]:
         "result_json": None,
         "new_reports": [],
         "return_code": None,
+        "process": None,
+        "cancellation_requested": False,
     }
 
     with TASK_LOCK:
@@ -414,6 +534,24 @@ def create_task(workflow: str, params: dict[str, Any]) -> dict[str, Any]:
     thread = threading.Thread(target=run_task, args=(task_id,), daemon=True)
     thread.start()
     return task_snapshot(task)
+
+
+def cancel_task(task_id: str) -> dict[str, Any]:
+    with TASK_LOCK:
+        task = TASKS.get(task_id)
+        if not task:
+            raise KeyError("Task not found.")
+        process = task.get("process")
+        if task.get("status") not in {"queued", "running", "cancelling"}:
+            return task_snapshot(task)
+        task["cancellation_requested"] = True
+        task["status"] = "cancelling"
+
+    if process and process.poll() is None:
+        process.terminate()
+
+    with TASK_LOCK:
+        return task_snapshot(TASKS[task_id])
 
 
 def load_report_file(name: str) -> tuple[dict[str, Any], int]:
@@ -484,6 +622,10 @@ class QuantWorkbenchHandler(SimpleHTTPRequestHandler):
             self.send_json(build_meta_payload())
             return
 
+        if path == "/api/readiness":
+            self.send_json(build_readiness_payload())
+            return
+
         if path == "/api/reports":
             self.send_json({"items": list_reports()})
             return
@@ -521,6 +663,16 @@ class QuantWorkbenchHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/tasks/") and parsed.path.endswith("/cancel"):
+            task_id = parsed.path.split("/")[-2]
+            try:
+                snapshot = cancel_task(task_id)
+            except KeyError as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
+                return
+            self.send_json(snapshot)
+            return
+
         if parsed.path != "/api/tasks":
             self.send_json({"error": "Not found."}, HTTPStatus.NOT_FOUND)
             return
