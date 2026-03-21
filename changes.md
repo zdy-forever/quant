@@ -1,5 +1,53 @@
 # Changes Log
 
+## 2026-03-21 1.0.21（冒头因子家族二次拆分）
+
+### 继续围绕已经冒头的信号做定向扩展
+
+- 更新了 [factors/breakout.py](factors/breakout.py)
+  - 新增：
+    - `breakout_distance_60`
+    - `ma_distance_60`
+    - `ma_gap_20_60`
+- 更新了 [factors/microstructure.py](factors/microstructure.py)
+  - 新增：
+    - `overnight_gap_20`
+    - `intraday_strength_10`
+    - `intraday_hit_rate_10`
+    - `channel_position_20`
+- 更新了 [factors/risk_structure.py](factors/risk_structure.py)
+  - 新增：
+    - `downside_risk_60`
+    - `downside_to_total_vol_20`
+    - `gap_volatility_60`
+    - `gap_downside_vol_20`
+    - `vol_of_range_60`
+- 更新了 [factors/volatility.py](factors/volatility.py)
+  - 新增：
+    - `low_volatility_60`
+    - `vol_compression_5_20`
+
+### 这轮扩展的原则
+
+- 不再广撒网加新主题
+- 只围绕已经在最新 report 里冒头的：
+  - `gap_volatility_20`
+  - `intraday_strength_5`
+  - `ma_distance_20`
+  - `vol_of_range_20`
+  - `downside_risk_20`
+  - `channel_position_60`
+- 把它们拆成：
+  - 短中期不同窗口
+  - 均值和命中率
+  - 总波动和 downside-only 风险
+  - 价格位置和均线斜率
+
+### 测试
+
+- 更新了 [tests/test_new_factor_families.py](tests/test_new_factor_families.py)
+- 当前新增因子注册与生成测试继续通过
+
 ## 2026-03-21 1.0.20（新因子族扩展 + Mix-Aware 搜索提速）
 
 ### 新增了四组原子因子族
