@@ -26,6 +26,22 @@ def risk_structure_factor_definitions() -> Dict[str, FactorDefinition]:
             source_url="https://doi.org/10.1111/j.1540-6261.2006.00851.x",
             source_note="把总体波动拆成 downside-only 风险，更适合和反转/趋势因子搭配看。",
         ),
+        "downside_risk_60": FactorDefinition(
+            name="downside_risk_60",
+            category="risk_structure",
+            description="过去 60 日负收益波动率取负号，用来观察更慢的 downside 风险层级。",
+            source_title="Downside Risk",
+            source_url="https://doi.org/10.1111/j.1540-6261.2006.00851.x",
+            source_note="和 20 日版本一起看，可以区分短期风险骤变和中期风险体质。",
+        ),
+        "downside_to_total_vol_20": FactorDefinition(
+            name="downside_to_total_vol_20",
+            category="risk_structure",
+            description="20 日 downside 风险相对总波动的占比，越高代表风险更偏下行主导。",
+            source_title="Downside Risk",
+            source_url="https://doi.org/10.1111/j.1540-6261.2006.00851.x",
+            source_note="把波动水平和风险方向性拆开，观察波动是否主要来自下跌。",
+        ),
         "range_expansion_5_20": FactorDefinition(
             name="range_expansion_5_20",
             category="risk_structure",
@@ -42,6 +58,22 @@ def risk_structure_factor_definitions() -> Dict[str, FactorDefinition]:
             source_url="https://www.jstor.org/stable/222483",
             source_note="隔夜风险高的股票，其次日横截面 alpha 常和普通日内波动不同。",
         ),
+        "gap_volatility_60": FactorDefinition(
+            name="gap_volatility_60",
+            category="risk_structure",
+            description="60 日隔夜跳空波动率，用来观察更慢的消息风险体质。",
+            source_title="Price Momentum and Trading Volume",
+            source_url="https://www.jstor.org/stable/222483",
+            source_note="和 20 日版本一起看，可以区分短期消息爆发和长期消息敏感体质。",
+        ),
+        "gap_downside_vol_20": FactorDefinition(
+            name="gap_downside_vol_20",
+            category="risk_structure",
+            description="20 日负向隔夜跳空波动率，越高代表坏消息隔夜风险更集中。",
+            source_title="Price Momentum and Trading Volume",
+            source_url="https://www.jstor.org/stable/222483",
+            source_note="把 gap 风险拆成方向性更强的 downside-only 版本。",
+        ),
         "vol_of_range_20": FactorDefinition(
             name="vol_of_range_20",
             category="risk_structure",
@@ -49,6 +81,14 @@ def risk_structure_factor_definitions() -> Dict[str, FactorDefinition]:
             source_title="Volatility Trading",
             source_url="https://onlinelibrary.wiley.com/doi/book/10.1002/9781119204198",
             source_note="把“波动水平”和“波动是否稳定”拆成两个维度。",
+        ),
+        "vol_of_range_60": FactorDefinition(
+            name="vol_of_range_60",
+            category="risk_structure",
+            description="60 日真实波幅占比的波动率，用来观察更慢的波动稳定性。",
+            source_title="Volatility Trading",
+            source_url="https://onlinelibrary.wiley.com/doi/book/10.1002/9781119204198",
+            source_note="帮助区分短期噪音升温和长期高不稳定结构。",
         ),
     }
 
@@ -70,10 +110,20 @@ def build_risk_structure_factor_frame(df: pd.DataFrame) -> pd.DataFrame:
     atr_5 = true_range.groupby(df["symbol"]).transform(lambda s: s.rolling(5).mean())
     atr_20 = true_range.groupby(df["symbol"]).transform(lambda s: s.rolling(20).mean())
     downside_ret = daily_ret.clip(upper=0.0)
+    total_vol_20 = daily_ret.groupby(df["symbol"]).transform(lambda s: s.rolling(20).std(ddof=0))
+    downside_gap = overnight_gap.clip(upper=0.0)
 
     out = df[["timestamp", "symbol"]].copy()
     out["downside_risk_20"] = -downside_ret.groupby(df["symbol"]).transform(lambda s: s.rolling(20).std(ddof=0))
+    out["downside_risk_60"] = -downside_ret.groupby(df["symbol"]).transform(lambda s: s.rolling(60).std(ddof=0))
+    out["downside_to_total_vol_20"] = (
+        downside_ret.groupby(df["symbol"]).transform(lambda s: s.rolling(20).std(ddof=0))
+        / total_vol_20.replace(0.0, np.nan)
+    )
     out["range_expansion_5_20"] = atr_5 / atr_20.replace(0.0, np.nan)
     out["gap_volatility_20"] = overnight_gap.groupby(df["symbol"]).transform(lambda s: s.rolling(20).std(ddof=0))
+    out["gap_volatility_60"] = overnight_gap.groupby(df["symbol"]).transform(lambda s: s.rolling(60).std(ddof=0))
+    out["gap_downside_vol_20"] = downside_gap.groupby(df["symbol"]).transform(lambda s: s.rolling(20).std(ddof=0))
     out["vol_of_range_20"] = true_range_pct.groupby(df["symbol"]).transform(lambda s: s.rolling(20).std(ddof=0))
+    out["vol_of_range_60"] = true_range_pct.groupby(df["symbol"]).transform(lambda s: s.rolling(60).std(ddof=0))
     return out
