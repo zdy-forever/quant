@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quant Local Workbench</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <p class="eyebrow">Local Research Console</p>
+          <h1>Quant Workbench</h1>
+          <p class="brand-copy">
+            给朋友本地使用的研究工作台。挑因子、改参数、发起任务、看回测结果，都在这里完成。
+          </p>
+        </div>
+
+        <nav class="nav-list">
+          <button class="nav-item active" data-section="overview">总览</button>
+          <button class="nav-item" data-section="lab">研究台</button>
+          <button class="nav-item" data-section="reports">报告库</button>
+        </nav>
+
+        <div class="sidebar-card" id="server-status-card">
+          <p class="card-label">本地状态</p>
+          <div class="status-row">
+            <span class="status-dot" id="health-dot"></span>
+            <span id="health-text">连接中...</span>
+          </div>
+          <p class="muted" id="python-badge">检测 Python...</p>
+        </div>
+      </aside>
+
+      <main class="main-pane">
+        <section class="hero">
+          <div class="hero-copy-block">
+            <p class="eyebrow">Friend-Friendly Onboarding</p>
+            <h2>web端</h2>
+            <p class="hero-copy">
+              你好
+            </p>
+            <div class="hero-badges">
+              <span class="hero-badge">Localhost only</span>
+              <span class="hero-badge">Paper account</span>
+              <span class="hero-badge">Research first</span>
+            </div>
+          </div>
+          <div class="hero-actions">
+            <button class="ghost-btn" id="refresh-all">刷新数据</button>
+            <button class="accent-btn" id="open-default-workflow">开始一轮研究</button>
+          </div>
+        </section>
+
+        <section class="content-section active" id="section-overview">
+          <div class="grid-two">
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">Workspace</p>
+                  <h3>当前环境</h3>
+                </div>
+              </div>
+              <div class="meta-list" id="meta-list"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">Quick Access</p>
+                  <h3>推荐入口</h3>
+                </div>
+              </div>
+              <div class="quick-actions" id="quick-actions"></div>
+            </article>
+          </div>
+
+          <div class="grid-two">
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">Factors</p>
+                  <h3>可选因子</h3>
+                </div>
+              </div>
+              <div class="chip-wall" id="factor-wall"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">Strategies</p>
+                  <h3>策略入口</h3>
+                </div>
+              </div>
+              <div class="chip-wall" id="strategy-wall"></div>
+            </article>
+          </div>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Recent Reports</p>
+                <h3>最新报告</h3>
+              </div>
+              <button class="ghost-btn small" id="jump-to-reports">查看全部</button>
+            </div>
+            <div class="report-strip" id="recent-reports"></div>
+          </article>
+        </section>
+
+        <section class="content-section" id="section-lab">
+          <div class="grid-lab">
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">Workflow</p>
+                  <h3>选择研究流程</h3>
+                </div>
+              </div>
+              <div class="workflow-list" id="workflow-list"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">Parameters</p>
+                  <h3 id="form-title">参数面板</h3>
+                </div>
+              </div>
+              <form id="workflow-form">
+                <div id="workflow-description" class="lead"></div>
+                <div id="form-fields" class="form-grid"></div>
+                <div class="command-preview">
+                  <p class="panel-kicker">Command Preview</p>
+                  <pre id="command-preview-text">等待选择流程...</pre>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="ghost-btn" id="reset-form">恢复默认</button>
+                  <button type="submit" class="accent-btn">启动任务</button>
+                </div>
+              </form>
+            </article>
+          </div>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Task Center</p>
+                <h3>任务与日志</h3>
+              </div>
+            </div>
+            <div class="tasks-layout">
+              <div class="task-list" id="task-list"></div>
+              <div class="task-detail" id="task-detail">
+                <p class="empty-state">还没有任务。提交一个研究流程后，这里会显示执行日志和新生成的报告。</p>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="content-section" id="section-reports">
+          <div class="reports-layout">
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">Report Library</p>
+                  <h3>报告列表</h3>
+                </div>
+              </div>
+              <div class="report-list" id="report-list"></div>
+            </article>
+
+            <article class="panel report-viewer">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">Inspector</p>
+                  <h3 id="report-title">选择一份报告</h3>
+                </div>
+              </div>
+              <div id="report-content">
+                <p class="empty-state">从左侧选择一份 JSON 报告，页面会自动抽取关键指标和摘要。</p>
+              </div>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+  </html>
