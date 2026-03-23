@@ -1,5 +1,421 @@
 # Changes Log
 
+## 2026-03-23 1.0.39（Mixture 邻居加权融合）
+
+### 把 OOS 的 mix-aware 选择从“最近邻单模型”升级成“多邻居加权组合”
+
+- 更新了 [pipelines/run_alpha_combo_regime_switch.py](pipelines/run_alpha_combo_regime_switch.py)
+  - 新增 `mixture_neighbor_count` 和 `mixture_distance_power`
+  - OOS mix 窗口不再只匹配一个最近训练窗口，而是会选最近的多个训练 mix 邻居
+  - 每个邻居先按自己的因子、权重、`top_n` 和执行门槛生成目标持仓
+  - 再按 mix 距离做反比加权，在组合层合成最终权重后回测
+  - 报告里新增：
+    - 邻居数量
+    - 邻居权重
+    - 匹配到的训练窗口列表
+  - Markdown 报告现在会明确标注 `top-N inverse-distance ensemble`
+- 更新了 [main.py](main.py)
+  - `alpha-combo-regime-switch` 新增命令行参数：
+    - `--mixture-neighbor-count`
+    - `--mixture-distance-power`
+- 更新了 [notifications/emailer.py](notifications/emailer.py)
+  - `selected_factors(选中因子)` 现在支持展示多组 ensemble 因子
+  - 邮件会显示：
+    - `ensemble_member_count(融合近邻数)`
+    - `matched_train_windows(匹配训练窗口)`
+
+### 测试
+
+- 更新了 [tests/test_regime_mixture_research.py](tests/test_regime_mixture_research.py)
+  - 新增 mix 邻居选择和权重归一化测试
+  - 新增数值型诊断信息加权聚合测试
+- 更新了 [tests/test_emailer.py](tests/test_emailer.py)
+  - 新增多组 ensemble 因子邮件展示测试
+- 当前相关测试通过：`12 passed`
+
+## 2026-03-22 1.0.38（轻量 ML 权重学习接入 Regime Switch）
+
+### 开始把机器学习约束在“学组合权重”这一层
+
+- 新增了 [research/ml_factor_weights.py](research/ml_factor_weights.py)
+  - 使用轻量 `ridge` 正则化线性模型
+  - 只在训练期学习小规模候选因子的固定权重
+  - 样本外只拿固定权重打分，不做在线再训练
+  - 会强制沿用单因子研究已经确认的方向，不让 ML 随意翻多空方向
+- 更新了 [pipelines/run_alpha_combo_regime_switch.py](pipelines/run_alpha_combo_regime_switch.py)
+  - 每个候选组合现在会同时比较：
+    - `heuristic` 启发式权重
+    - `ridge_ml` 训练期机器学习权重
+  - 只有当 `ridge_ml` 学出来的权重与启发式权重确实有明显差异时，才会作为新候选进入正式搜索，尽量避免只是徒增复杂度
+- 更新了 [notifications/emailer.py](notifications/emailer.py)
+  - 邮件里现在会直接显示 `weighting_method(权重生成方式)`，便于区分结果到底来自启发式还是 ML 权重
+
+### 测试
+
+- 新增了 [tests/test_ml_factor_weights.py](tests/test_ml_factor_weights.py)
+  - 覆盖 `ridge` 权重学习的基础行为
+- 更新了 [tests/test_emailer.py](tests/test_emailer.py)
+- 当前相关测试通过：`11 passed`
+
+## 2026-03-22 1.0.37（允许不开固定止盈的进攻型执行搜索）
+
+### 继续排查是不是策略层把赢家提前砍掉了
+
+- 更新了 [backtest/engine.py](backtest/engine.py)
+  - 当 `take_profit_pct <= 0` 时，固定止盈会被显式关闭
+  - 当 `stop_loss_pct <= 0` 时，固定止损会被显式关闭
+  - 当 `trailing_stop_atr_multiple <= 0` 时，ATR 追踪止损会被显式关闭
+- 更新了 [pipelines/run_alpha_combo_regime_switch.py](pipelines/run_alpha_combo_regime_switch.py)
+  - 默认执行 profile 现在会正式搜索一类：
+    - 不开固定止盈
+    - 更长持有
+    - 更强 rank tilt
+    - 更集中的动态持仓
+
+### 测试
+
+- 更新了 [tests/test_portfolio_risk_overlay.py](tests/test_portfolio_risk_overlay.py)
+  - 新增“不启用固定止盈”测试
+- 更新了 [tests/test_regime_mixture_research.py](tests/test_regime_mixture_research.py)
+  - 新增无固定止盈 profile 断言
+- 当前相关测试通过：`12 passed`
+
+## 2026-03-22 1.0.36（Regime Switch 目标函数改为平均年化优先）
+
+### 修正了研究目标，不再把“单窗口达标率”误当成最终目标
+
+- 更新了 [pipelines/run_alpha_combo_regime_switch.py](pipelines/run_alpha_combo_regime_switch.py)
+  - `regime-switch` 的候选评分现在更偏向：
+    - 在控制回撤的前提下提高 `OOS CAGR`
+    - 用 `avg_cagr` 作为更核心的结果口径
+  - aggressive / conservative 的窗口内选择不再要求“单窗口先达到 15% 年化”才算可用
+  - `mixture_research.oos_validation_summary` 新增：
+    - `avg_cagr_gap`
+    - `avg_cagr_target_met`
+- 更新了 [notifications/emailer.py](notifications/emailer.py)
+  - 状态切换邮件现在会直接告诉你“平均年化目标是否达成”
+
+### 测试
+
+- 更新了 [tests/test_regime_mixture_research.py](tests/test_regime_mixture_research.py)
+- 更新了 [tests/test_emailer.py](tests/test_emailer.py)
+- 当前相关测试通过：`10 passed`
+
+## 2026-03-22 1.0.35（收益率优先的激进搜索扩展）
+
+### 继续把 regime-switch 从“稳”往“更有收益弹性”推
+
+- 更新了 [factors/offense.py](factors/offense.py)
+  - 新增更偏进攻的因子：
+    - `upside_followthrough_10_20`
+    - `breakout_thrust_20_60`
+    - `gap_trend_acceleration_20_60`
+    - `trend_strength_spread_20_60`
+    - `squeeze_followthrough_5_20_60`
+- 更新了 [factors/hybrid.py](factors/hybrid.py)
+  - 新增更偏突破延续/买盘扩散的中层组合因子：
+    - `upside_breakout_fusion_20_60`
+    - `intraday_breakout_followthrough_10_60`
+    - `gap_momentum_balance_20_60`
+    - `trend_pressure_release_20_60`
+
+### 正式把“更激进的持仓和退出策略”接进 regime-switch 搜索
+
+- 更新了 [pipelines/run_alpha_combo_regime_switch.py](pipelines/run_alpha_combo_regime_switch.py)
+  - aggressive 搜索现在会正式比较：
+    - 更集中的 `top_n`
+    - 更高的 `gross_exposure`
+    - 更长持有周期
+    - 更宽松的 `stop_loss_pct`
+    - 更高的 `take_profit_pct`
+    - 更松的 `trailing_stop_atr_multiple`
+  - conservative overlay 现在也会一起比较不同 `top_n`，不再固定持仓广度
+  - 新增默认 `top_n` 候选，会自动尝试比当前更集中的持仓数
+- 更新了 [main.py](main.py)
+  - `alpha-combo-regime-switch` 新增：
+    - `--top-n-grid`
+    - `--stop-loss-pct-grid`
+    - `--take-profit-pct-grid`
+    - `--trailing-stop-atr-multiple-grid`
+  - 修复了若干执行参数只暴露命令行但没有真正写回 `BacktestConfig` 的问题
+
+### 测试
+
+- 更新了 [tests/test_new_factor_families.py](tests/test_new_factor_families.py)
+- 更新了 [tests/test_regime_mixture_research.py](tests/test_regime_mixture_research.py)
+- 当前相关测试通过：`9 passed`
+
+## 2026-03-22 1.0.34（邮件通知可读性修复）
+
+### 修复了 Regime Switch 邮件只发 JSON 文件名的问题
+
+- 更新了 [notifications/emailer.py](notifications/emailer.py)
+  - `alpha-combo-regime-switch` 现在会直接发：
+    - 样本外窗口数
+    - 达标窗口占比
+    - 平均年化收益率
+    - 平均最大回撤
+    - 平均夏普比率
+    - 最新窗口选中的版本、因子、执行参数和交易过滤
+  - 邮件里的核心英文指标现在会带中文名，例如：
+    - `sharpe(夏普比率)`
+    - `cagr(年化收益率)`
+    - `max_dd(最大回撤)`
+  - 报告文件列表改成逐行展示，不再直接塞一整段 JSON
+- 兼容了缺少 `python-dotenv` 的环境
+  - 没装 `dotenv` 时本地补发邮件和正文渲染也不会直接崩掉
+
+### 测试
+
+- 新增了 [tests/test_emailer.py](tests/test_emailer.py)
+  - 覆盖 `regime-switch` 邮件正文摘要
+  - 覆盖双语指标显示
+  - 覆盖无 `dotenv` 环境下的导入
+
+## 2026-03-22 1.0.32（组合级新增仓位限速）
+
+### 继续优化交易执行，不再默认一步跳到目标仓位
+
+- 更新了 [backtest/engine.py](backtest/engine.py)
+  - 新增 `max_entry_turnover_per_rebalance`
+  - 这个限制只约束“新增仓位”的速度，不阻碍卖出、止损和去杠杆
+  - 目的不是把收益硬调好看，而是减少高噪音环境下的猛切仓
+- 更新了 [config/runtime.yaml](config/runtime.yaml)
+  - 把该执行参数接入默认回测配置
+- 更新了 [pipelines/run_alpha_combo_regime_switch.py](pipelines/run_alpha_combo_regime_switch.py)
+  - 该参数已接入执行策略搜索 profile
+- 更新了 [main.py](main.py)
+  - `alpha-combo-regime-switch` 新增 `--max-entry-turnover-per-rebalance-grid`
+
+## 2026-03-22 1.0.33（动态持仓广度 + blocked ratio 入评分）
+
+### 继续把非因子层的真实交易约束接进研究
+
+- 更新了 [backtest/engine.py](backtest/engine.py)
+  - 新增 `dynamic_breadth_score_threshold`
+  - 新增 `min_dynamic_positions`
+  - 允许按当日强信号数量动态收缩持仓广度，而不是始终机械持有固定 `top_n`
+- 更新了 [pipelines/run_alpha_combo_regime_switch.py](pipelines/run_alpha_combo_regime_switch.py)
+  - 执行 profile 现在会搜索动态广度和更长持有周期
+  - `trade filter` 的 `blocked_ratio` 已直接进入候选评分，不再只是诊断信息
+- 更新了 [main.py](main.py)
+  - `alpha-combo-regime-switch` 新增：
+    - `--dynamic-breadth-score-threshold-grid`
+    - `--min-dynamic-positions-grid`
+
+### 测试
+
+- 更新了 [tests/test_execution_controls.py](tests/test_execution_controls.py)
+  - 新增动态持仓广度测试
+- 更新了 [tests/test_regime_mixture_research.py](tests/test_regime_mixture_research.py)
+  - 新增动态广度执行 profile 测试
+
+### 测试
+
+- 更新了 [tests/test_portfolio_risk_overlay.py](tests/test_portfolio_risk_overlay.py)
+  - 新增新增仓位限速测试
+
+## 2026-03-22 1.0.30（执行策略正式接入 Regime Switch 搜索）
+
+### 把“选股/交易执行”从手动调参变成正式研究对象
+
+- 更新了 [pipelines/run_alpha_combo_regime_switch.py](pipelines/run_alpha_combo_regime_switch.py)
+  - 新增了一套窄而可解释的执行 profile 搜索：
+    - `min_score_threshold`
+    - `rank_weight_power`
+    - `hold_rank_buffer`
+    - `score_hysteresis`
+    - `rebalance_every_n_days`
+  - aggressive 组合现在也会先过一轮执行策略筛选，不再默认只比较“因子 + 风控”
+  - conservative overlay 现在会联合搜索“组合级风控 + 执行策略”，不是只搜回撤闸门
+  - 评分里加入了轻量 `avg_turnover` 惩罚，避免因为高频噪音换仓把样本内结果抬得太好看
+- 更新了 [main.py](main.py)
+  - `alpha-combo-regime-switch` 新增执行策略搜索网格参数：
+    - `--rebalance-every-n-days-grid`
+    - `--min-score-threshold-grid`
+    - `--rank-weight-power-grid`
+    - `--hold-rank-buffer-grid`
+    - `--score-hysteresis-grid`
+    - `--max-holding-days-grid`
+
+### 测试
+
+- 更新了 [tests/test_regime_mixture_research.py](tests/test_regime_mixture_research.py)
+  - 新增执行策略搜索网格的默认行为测试
+  - 新增显式搜索空间测试
+
+## 2026-03-22 1.0.31（Trade Filter 正式接入 Regime Switch 搜索）
+
+### 把下单前过滤也变成正式研究对象
+
+- 更新了 [pipelines/run_alpha_combo_regime_switch.py](pipelines/run_alpha_combo_regime_switch.py)
+  - aggressive / conservative 搜索现在都会同时比较 `trade_filters`
+  - mixture library 与 OOS window 验证不再丢失已选过滤配置
+  - 默认只搜索一小组可解释的过滤 profile，避免无边界扩大搜索空间
+- 更新了 [main.py](main.py)
+  - `alpha-combo-regime-switch` 新增过滤网格参数：
+    - `--min-close-location-1-grid`
+    - `--max-true-range-pct-1-grid`
+    - `--max-volume-surprise-5-grid`
+    - `--max-abs-ma-distance-20-grid`
+    - `--min-liquidity-20-grid`
+
+### 测试
+
+- 更新了 [tests/test_regime_mixture_research.py](tests/test_regime_mixture_research.py)
+  - 新增 trade filter profile 默认行为测试
+  - 新增显式过滤搜索空间测试
+
+## 2026-03-21 1.0.29（独立后台报告 watcher）
+
+### 不再依赖会话存活来做轮询
+
+- 新增了 [scripts/regime_report_watch.sh](scripts/regime_report_watch.sh)
+  - 增加了 `check-once` 模式，便于接系统级调度
+  - 状态、PID、日志统一落到 `artifacts/runtime/`
+  - 发现新的 `alpha_combo_regime_switch_*.json` 时会记录摘要，macOS 环境下还会尝试弹本地通知
+
+## 2026-03-21 1.0.28（持仓保留 buffer + 滞后退出）
+
+### 继续往选股和交易执行层优化
+
+- 更新了 [backtest/engine.py](backtest/engine.py)
+  - 新增 `hold_rank_buffer`
+  - 新增 `score_hysteresis`
+  - 现在可以让已有持仓在“略微掉出 top-N”或“短暂跌破进场阈值”时继续保留，不再被噪音信号立刻洗掉
+- 更新了 [main.py](main.py)
+  - `alpha-combo-regime-switch` 新增：
+    - `--hold-rank-buffer`
+    - `--score-hysteresis`
+- 更新了 [config/runtime.yaml](config/runtime.yaml)
+  - 把这两个执行参数接进默认回测配置
+
+### 测试
+
+- 更新了 [tests/test_execution_controls.py](tests/test_execution_controls.py)
+- 新增了“持仓保留 buffer”和“滞后退出”两类执行层测试
+
+## 2026-03-21 1.0.27（Regime Switch 接入执行参数）
+
+### 正式搜索现在可以直接研究选股和交易执行参数
+
+- 更新了 [main.py](main.py)
+  - `alpha-combo-regime-switch` 新增：
+    - `--min-score-threshold`
+    - `--rank-weight-power`
+  - 这样可以在正式 regime-switch 搜索里直接比较“少持弱信号”和“高分重仓”这类执行策略，而不只是继续换因子
+
+### 当前方向
+
+- 因子层继续追求更强收益弹性
+- 选股层开始允许低信号日少持仓
+- 交易层开始允许按排名强度倾斜仓位
+
+## 2026-03-21 1.0.26（选股阈值 + 强度加权仓位）
+
+### 给选股和交易执行补了两个直接可控的杠杆
+
+- 更新了 [backtest/engine.py](backtest/engine.py)
+  - 新增 `min_score_threshold`，允许在低信号日期少持仓，不再默认硬塞满 `top-N`
+  - 新增 `rank_weight_power`，允许按排名强度倾斜仓位，而不是始终等权
+- 更新了 [config/runtime.yaml](config/runtime.yaml)
+  - 把这两个执行参数接进默认回测配置
+
+### 测试
+
+- 新增了 [tests/test_execution_controls.py](tests/test_execution_controls.py)
+- 当前相关测试共 `7` 项通过
+
+## 2026-03-21 1.0.25（进攻型因子族扩展）
+
+### 新增一组更偏收益弹性的因子
+
+- 新增了 [factors/offense.py](factors/offense.py)
+  - `momentum_acceleration_20_60`
+  - `upside_pressure_20`
+  - `intraday_followthrough_5_20`
+  - `squeeze_breakout_5_20_60`
+- 更新了 [factors/__init__.py](factors/__init__.py)
+  - 把新的 `offense` 因子族接入统一注册表和 `build_factor_panel`
+
+### 这轮扩展的目标
+
+- 不再优先给组合补“更稳”的因子
+- 开始直接补收益弹性、趋势加速、强收盘跟随和压缩释放这类更偏进攻的信号
+- 后续组合搜索会在保持低相关约束的前提下，允许更复杂的 4 因子组合去争取更高收益
+
+### 测试
+
+- 更新了 [tests/test_new_factor_families.py](tests/test_new_factor_families.py)
+- 当前相关测试继续通过
+
+## 2026-03-21 1.0.24（稳定性筛选 + 新中层组合因子）
+
+### 给因子筛选补了分段稳定性约束
+
+- 更新了 [research/factor_tests.py](research/factor_tests.py)
+  - 单因子验证现在会额外记录分段 `rank_ic` / `spread` 稳定性
+  - 新增 `stability_segments` 和 `min_stability_segment_days`
+- 更新了 [research/factor_combo_search.py](research/factor_combo_search.py)
+  - 因子池筛选会检查 train / OOS 的分段一致性，不再只看整体均值
+  - `selection_score` 也加入了稳定性奖励，尽量减少“均值好看但分段来回翻”的信号
+- 更新了 [main.py](main.py)
+  - 把新的稳定性配置接进运行时配置和 regime-switch 命令入口
+
+### 继续沿着最近反复冒头的结构扩中层组合因子
+
+- 更新了 [factors/hybrid.py](factors/hybrid.py)
+  - 新增：
+    - `intraday_quiet_strength_10_60`
+    - `gap_strength_balance_20_10`
+    - `channel_defense_20_60`
+    - `gap_breakout_quality_20_60`
+
+### 测试
+
+- 新增了 [tests/test_factor_combo_stability.py](tests/test_factor_combo_stability.py)
+- 更新了 [tests/test_new_factor_families.py](tests/test_new_factor_families.py)
+- 当前相关测试共 `5` 项通过
+
+## 2026-03-21 1.0.23（Regime Switch 候选池缩小回归修复）
+
+### 修复了聚焦搜索时冻结模型对比会缺列的问题
+
+- 更新了 [pipelines/run_alpha_combo_regime_switch.py](pipelines/run_alpha_combo_regime_switch.py)
+  - 当 `--candidate-factors` 缩小研究候选池时，冻结的激进版 / 保守版对比会自动回退到完整因子面板
+  - 避免在对比旧模型时因为 `reversal_5`、`trend_pullback_20_5` 这类未纳入本轮候选池的因子缺失而直接报错
+
+### 测试
+
+- 更新了 [tests/test_regime_mixture_research.py](tests/test_regime_mixture_research.py)
+- 当前 `regime mixture` 与新增因子测试共 `4` 项通过
+
+## 2026-03-21 1.0.22（工程化组合因子扩展）
+
+### 新增一组可解释的中层组合因子
+
+- 新增了 [factors/hybrid.py](factors/hybrid.py)
+  - `gap_channel_alignment_20_60`
+  - `intraday_resilience_10_20`
+  - `quiet_trend_pressure_20`
+  - `stable_range_breakout_20_60`
+  - `gap_risk_balance_20`
+  - `trend_structure_alignment_20_60`
+  - `breakout_quality_60`
+- 更新了 [factors/__init__.py](factors/__init__.py)
+  - 把新的 `hybrid` 因子族接入统一注册表和 `build_factor_panel`
+
+### 这轮组合因子的设计原则
+
+- 不直接把很多主题混成黑箱总分
+- 只围绕已经在 mix-aware 研究里冒头的方向做少量中层组合
+- 每个组合因子都保持可解释，方便继续做 train / OOS 严格验证
+
+### 测试
+
+- 更新了 [tests/test_new_factor_families.py](tests/test_new_factor_families.py)
+- 当前新增组合因子注册与生成测试通过
+
 ## 2026-03-21 1.0.21（冒头因子家族二次拆分）
 
 ### 继续围绕已经冒头的信号做定向扩展

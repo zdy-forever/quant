@@ -1,0 +1,8 @@
+2026-03-21 23:48:50 AEDT started pid=28779 interval=300s
+2026-03-21 23:49:30 AEDT started pid=28866 interval=300s
+zsh: can't open input file: start_watch
+2026-03-21 23:50:07 AEDT started pid=28957 interval=300s
+2026-03-21 23:50:57 AEDT started pid=29089 interval=300s
+2026-03-22 01:05:01 AEDT new_report:/Users/zdy/IdeaProjects/quant/artifacts/reports/alpha_combo_regime_switch_20260321_140438.json pass_rate=35.29% avg_cagr=0.59% avg_max_dd=-11.93% avg_sharpe=0.072
+2026-03-22 03:15:01 AEDT new_report:/Users/zdy/IdeaProjects/quant/artifacts/reports/alpha_combo_regime_switch_20260321_161437.json pass_rate=35.29% avg_cagr=0.59% avg_max_dd=-11.93% avg_sharpe=0.072
+2026-03-22 04:00:00 AEDT new_report:/Users/zdy/IdeaProjects/quant/artifacts/reports/alpha_combo_regime_switch_20260321_165904.json pass_rate=5.88% avg_cagr=2.96% avg_max_dd=-5.72% avg_sharpe=0.550

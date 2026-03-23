@@ -25,6 +25,13 @@ class BacktestConfig:
     max_positions: int = 10
     gross_exposure: float = 1.0
     rebalance_every_n_days: int = 1
+    min_score_threshold: float = -999.0
+    rank_weight_power: float = 0.0
+    hold_rank_buffer: int = 0
+    score_hysteresis: float = 0.0
+    max_entry_turnover_per_rebalance: float = 0.0
+    dynamic_breadth_score_threshold: float = -999.0
+    min_dynamic_positions: int = 0
     slippage_bps: float = 5.0
     commission_bps: float = 0.0
     stop_loss_pct: float = 0.08
@@ -84,22 +91,94 @@ def build_daily_target_weights(
     if score is not None:
         score_df = score.rename("score").reset_index()
         score_df["timestamp"] = pd.to_datetime(score_df["timestamp"], utc=True)
-        sig_df = sig_df.merge(score_df, on=["timestamp", "symbol"], how="left")
+        universe_df = score_df.merge(sig_df, on=["timestamp", "symbol"], how="left")
+        universe_df["signal"] = universe_df["signal"].fillna(0.0).astype(float)
     else:
-        sig_df["score"] = sig_df["signal"]
+        universe_df = sig_df.copy()
+        universe_df["score"] = universe_df["signal"]
 
-    sig_df = sig_df[sig_df["signal"] > 0].copy()
-    if sig_df.empty:
+    universe_df = universe_df[universe_df["score"].notna()].copy()
+    if universe_df.empty:
         return pd.DataFrame(index=dates)
 
-    sig_df["rank"] = sig_df.groupby("timestamp")["score"].rank(method="first", ascending=False)
-    sig_df = sig_df[sig_df["rank"] <= cfg.max_positions].copy()
-    sig_df["weight"] = sig_df.groupby("timestamp")["symbol"].transform(lambda s: 1.0 / len(s))
-    sig_df["weight"] = sig_df["weight"] * cfg.gross_exposure
+    date_index = pd.DatetimeIndex(pd.to_datetime(pd.Index(dates), utc=True))
+    if date_index.empty:
+        return pd.DataFrame(index=date_index)
+    all_symbols = sorted(universe_df["symbol"].astype(str).unique())
 
+    entry_threshold = float(cfg.min_score_threshold)
+    hold_threshold = entry_threshold - max(float(cfg.score_hysteresis), 0.0)
+
+    selected_symbols: list[str] = []
+    weight_rows: list[pd.DataFrame] = []
+
+    for timestamp in date_index:
+        daily_df = universe_df[universe_df["timestamp"] == timestamp].copy()
+        if daily_df.empty:
+            selected_symbols = []
+            continue
+
+        daily_df = daily_df.sort_values(["score", "symbol"], ascending=[False, True]).reset_index(drop=True)
+        daily_df["rank"] = np.arange(1, len(daily_df) + 1, dtype=float)
+
+        entry_df = daily_df[
+            (daily_df["signal"] > 0.0) & (daily_df["score"] >= entry_threshold)
+        ].copy()
+        effective_max_positions = int(cfg.max_positions)
+        dynamic_breadth_threshold = float(cfg.dynamic_breadth_score_threshold)
+        if dynamic_breadth_threshold > -998.0:
+            strong_count = int(entry_df["score"].ge(dynamic_breadth_threshold).sum())
+            effective_max_positions = min(
+                effective_max_positions,
+                max(int(cfg.min_dynamic_positions), strong_count),
+            )
+        hold_rank_limit = max(effective_max_positions + max(int(cfg.hold_rank_buffer), 0), effective_max_positions)
+
+        retained_symbols: list[str] = []
+        if selected_symbols:
+            retain_df = daily_df[daily_df["symbol"].isin(selected_symbols)].copy()
+            retain_df = retain_df[
+                (retain_df["score"] >= hold_threshold) & (retain_df["rank"] <= float(hold_rank_limit))
+            ]
+            retained_symbols = retain_df.sort_values(["rank", "symbol"])["symbol"].astype(str).tolist()
+
+        next_symbols = list(retained_symbols)
+        for symbol in entry_df["symbol"].astype(str):
+            if len(next_symbols) >= int(effective_max_positions):
+                break
+            if symbol in next_symbols:
+                continue
+            next_symbols.append(symbol)
+
+        if not next_symbols:
+            selected_symbols = []
+            continue
+
+        selected_df = daily_df[daily_df["symbol"].isin(next_symbols)].copy()
+        if selected_df.empty:
+            selected_symbols = []
+            continue
+
+        if float(cfg.rank_weight_power) > 0.0:
+            selected_df["rank_weight"] = (
+                (float(max(effective_max_positions, 1)) - selected_df["rank"] + 1.0).clip(lower=1.0) ** float(cfg.rank_weight_power)
+            )
+            rank_weight_sum = float(selected_df["rank_weight"].sum())
+            selected_df["weight"] = selected_df["rank_weight"] / max(rank_weight_sum, 1e-12)
+        else:
+            selected_df["weight"] = 1.0 / float(len(selected_df))
+
+        selected_df["weight"] = selected_df["weight"] * float(cfg.gross_exposure)
+        weight_rows.append(selected_df[["timestamp", "symbol", "weight"]].copy())
+        selected_symbols = selected_df.sort_values(["rank", "symbol"])["symbol"].astype(str).tolist()
+
+    if not weight_rows:
+        return pd.DataFrame(index=date_index)
+
+    weight_df = pd.concat(weight_rows, ignore_index=True)
     weights = (
-        sig_df.pivot(index="timestamp", columns="symbol", values="weight")
-        .reindex(dates)
+        weight_df.pivot(index="timestamp", columns="symbol", values="weight")
+        .reindex(index=date_index, columns=all_symbols)
         .fillna(0.0)
         .astype(float)
     )
@@ -255,9 +334,13 @@ def run_weight_backtest(
             state["days_held"] += 1
             state["peak_price"] = max(state["peak_price"], high_value if np.isfinite(high_value) else close_value)
 
-            hard_stop = state["entry_price"] * (1.0 - cfg.stop_loss_pct)
-            take_profit = state["entry_price"] * (1.0 + cfg.take_profit_pct)
-            trailing_stop = state["peak_price"] - cfg.trailing_stop_atr_multiple * atr_value if np.isfinite(atr_value) else -np.inf
+            hard_stop = state["entry_price"] * (1.0 - cfg.stop_loss_pct) if float(cfg.stop_loss_pct) > 0.0 else -np.inf
+            take_profit = state["entry_price"] * (1.0 + cfg.take_profit_pct) if float(cfg.take_profit_pct) > 0.0 else np.inf
+            trailing_stop = (
+                state["peak_price"] - cfg.trailing_stop_atr_multiple * atr_value
+                if float(cfg.trailing_stop_atr_multiple) > 0.0 and np.isfinite(atr_value)
+                else -np.inf
+            )
             effective_stop = max(hard_stop, trailing_stop)
 
             stop_hit = np.isfinite(low_value) and low_value <= effective_stop
@@ -293,6 +376,16 @@ def run_weight_backtest(
             next_weights = next_weights * (allowed_gross / gross)
             if allowed_gross < float(cfg.gross_exposure):
                 soft_deleverage_days += 1
+
+        max_entry_turnover = max(float(cfg.max_entry_turnover_per_rebalance), 0.0)
+        if max_entry_turnover > 0.0:
+            delta = next_weights - current_weights
+            buy_delta = delta.clip(lower=0.0)
+            buy_turnover = float(buy_delta.sum())
+            if buy_turnover > max_entry_turnover and buy_turnover > 1e-12:
+                scaled_buy_delta = buy_delta * (max_entry_turnover / buy_turnover)
+                next_weights = current_weights + delta.clip(upper=0.0) + scaled_buy_delta
+                next_weights = next_weights.clip(lower=0.0)
 
         turnover = float((next_weights - current_weights).abs().sum())
         equity *= max(0.0, 1.0 - turnover * cost_ratio)

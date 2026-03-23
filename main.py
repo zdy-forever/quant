@@ -19,6 +19,7 @@ import argparse
 import hashlib
 import json
 import os
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Any, Dict, List
 from zoneinfo import ZoneInfo
 import pandas as pd
@@ -579,6 +580,8 @@ def _load_factor_runtime_components(runtime: dict):
         quantiles=int(factor_cfg.get("quantiles", 5)),
         primary_horizon=int(factor_cfg.get("primary_horizon", 5)),
         min_cross_section=int(factor_cfg.get("min_cross_section", 20)),
+        stability_segments=int(factor_cfg.get("stability_segments", 4)),
+        min_stability_segment_days=int(factor_cfg.get("min_stability_segment_days", 20)),
     )
     selection_cfg = FactorSelectionConfig(
         primary_horizon=int(selection_raw.get("primary_horizon", test_cfg.primary_horizon)),
@@ -612,6 +615,10 @@ def _load_factor_combo_runtime(runtime: dict, test_cfg) -> dict:
         "min_oos_spread": float(combo_raw.get("min_oos_spread", 0.0)),
         "min_train_hit_rate": float(combo_raw.get("min_train_hit_rate", 0.50)),
         "min_oos_hit_rate": float(combo_raw.get("min_oos_hit_rate", 0.50)),
+        "min_train_rank_ic_consistency": float(combo_raw.get("min_train_rank_ic_consistency", 0.55)),
+        "min_oos_rank_ic_consistency": float(combo_raw.get("min_oos_rank_ic_consistency", 0.50)),
+        "min_train_spread_consistency": float(combo_raw.get("min_train_spread_consistency", 0.55)),
+        "min_oos_spread_consistency": float(combo_raw.get("min_oos_spread_consistency", 0.50)),
         "candidate_pool_size": int(combo_raw.get("candidate_pool_size", 8)),
         "min_combo_size": int(combo_raw.get("min_combo_size", 2)),
         "max_combo_size": int(combo_raw.get("max_combo_size", 4)),
@@ -632,6 +639,10 @@ def _apply_factor_combo_overrides(combo_cfg: dict, args: argparse.Namespace) -> 
         "min_oos_rank_ic",
         "min_train_hit_rate",
         "min_oos_hit_rate",
+        "min_train_rank_ic_consistency",
+        "min_oos_rank_ic_consistency",
+        "min_train_spread_consistency",
+        "min_oos_spread_consistency",
     ):
         value = getattr(args, key, None)
         if value is not None:
@@ -893,6 +904,12 @@ def cmd_alpha_combo_search(args: argparse.Namespace) -> None:
         adjustment=get_research_adjustment(runtime),
     )
     backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    backtest_cfg_dict = asdict(backtest_cfg)
+    if args.min_score_threshold is not None:
+        backtest_cfg_dict["min_score_threshold"] = float(args.min_score_threshold)
+    if args.rank_weight_power is not None:
+        backtest_cfg_dict["rank_weight_power"] = float(args.rank_weight_power)
+    backtest_cfg = BacktestConfig(**backtest_cfg_dict)
     universe_cfg, standardize_cfg, test_cfg, _ = _load_factor_runtime_components(runtime)
     combo_cfg = FactorComboSearchConfig(**_apply_factor_combo_overrides(_load_factor_combo_runtime(runtime, test_cfg), args))
     trade_filters = _load_alpha_trade_filters_runtime(runtime)
@@ -934,6 +951,14 @@ def cmd_alpha_combo_walk_forward(args: argparse.Namespace) -> None:
         adjustment=get_research_adjustment(runtime),
     )
     backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    if args.min_score_threshold is not None:
+        backtest_cfg = BacktestConfig(**{**asdict(backtest_cfg), "min_score_threshold": float(args.min_score_threshold)})
+    if args.rank_weight_power is not None:
+        backtest_cfg = BacktestConfig(**{**asdict(backtest_cfg), "rank_weight_power": float(args.rank_weight_power)})
+    if args.hold_rank_buffer is not None:
+        backtest_cfg = BacktestConfig(**{**asdict(backtest_cfg), "hold_rank_buffer": int(args.hold_rank_buffer)})
+    if args.score_hysteresis is not None:
+        backtest_cfg = BacktestConfig(**{**asdict(backtest_cfg), "score_hysteresis": float(args.score_hysteresis)})
     universe_cfg, standardize_cfg, test_cfg, _ = _load_factor_runtime_components(runtime)
     combo_cfg = FactorComboSearchConfig(**_apply_factor_combo_overrides(_load_factor_combo_runtime(runtime, test_cfg), args))
     trade_filters = _load_alpha_trade_filters_runtime(runtime)
@@ -979,6 +1004,14 @@ def cmd_alpha_combo_risk_search(args: argparse.Namespace) -> None:
         adjustment=get_research_adjustment(runtime),
     )
     backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    if args.min_score_threshold is not None:
+        backtest_cfg = BacktestConfig(**{**asdict(backtest_cfg), "min_score_threshold": float(args.min_score_threshold)})
+    if args.rank_weight_power is not None:
+        backtest_cfg = BacktestConfig(**{**asdict(backtest_cfg), "rank_weight_power": float(args.rank_weight_power)})
+    if args.hold_rank_buffer is not None:
+        backtest_cfg = BacktestConfig(**{**asdict(backtest_cfg), "hold_rank_buffer": int(args.hold_rank_buffer)})
+    if args.score_hysteresis is not None:
+        backtest_cfg = BacktestConfig(**{**asdict(backtest_cfg), "score_hysteresis": float(args.score_hysteresis)})
     universe_cfg, standardize_cfg, test_cfg, _ = _load_factor_runtime_components(runtime)
     trade_filters = _load_alpha_trade_filters_runtime(runtime)
 
@@ -1033,8 +1066,16 @@ def cmd_alpha_combo_regime_switch(args: argparse.Namespace) -> None:
     trade_ohlcv = full_ohlcv[full_ohlcv["symbol"].isin(set(symbols))].copy()
 
     backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    if args.min_score_threshold is not None:
+        backtest_cfg = BacktestConfig(**{**asdict(backtest_cfg), "min_score_threshold": float(args.min_score_threshold)})
+    if args.rank_weight_power is not None:
+        backtest_cfg = BacktestConfig(**{**asdict(backtest_cfg), "rank_weight_power": float(args.rank_weight_power)})
+    if args.hold_rank_buffer is not None:
+        backtest_cfg = BacktestConfig(**{**asdict(backtest_cfg), "hold_rank_buffer": int(args.hold_rank_buffer)})
+    if args.score_hysteresis is not None:
+        backtest_cfg = BacktestConfig(**{**asdict(backtest_cfg), "score_hysteresis": float(args.score_hysteresis)})
     universe_cfg, standardize_cfg, test_cfg, _ = _load_factor_runtime_components(runtime)
-    combo_cfg = FactorComboSearchConfig(**_load_factor_combo_runtime(runtime, test_cfg))
+    combo_cfg = FactorComboSearchConfig(**_apply_factor_combo_overrides(_load_factor_combo_runtime(runtime, test_cfg), args))
     trade_filters = _load_alpha_trade_filters_runtime(runtime)
     top_n, rebalance_every_n_days = _load_composite_runtime(runtime, args)
 
@@ -1050,6 +1091,7 @@ def cmd_alpha_combo_regime_switch(args: argparse.Namespace) -> None:
             conservative_model_path=args.conservative_model_path,
             candidate_factors=args.candidate_factors,
             top_n=top_n,
+            top_n_grid=args.top_n_grid,
             rebalance_every_n_days=rebalance_every_n_days,
             trade_filters=trade_filters,
             max_drawdown_gap=args.max_drawdown_gap,
@@ -1058,11 +1100,30 @@ def cmd_alpha_combo_regime_switch(args: argparse.Namespace) -> None:
             mix_window_days=args.mix_window_days,
             mix_step_days=args.mix_step_days,
             min_mix_sample_days=args.min_mix_sample_days,
+            mixture_neighbor_count=args.mixture_neighbor_count,
+            mixture_distance_power=args.mixture_distance_power,
             gross_exposure_grid=args.gross_exposure_grid,
             portfolio_soft_dd_grid=args.portfolio_soft_dd_grid,
             portfolio_deleverage_grid=args.portfolio_deleverage_grid,
             portfolio_hard_dd_grid=args.portfolio_hard_dd_grid,
             portfolio_cooldown_days_grid=args.portfolio_cooldown_days_grid,
+            rebalance_every_n_days_grid=args.rebalance_every_n_days_grid,
+            min_score_threshold_grid=args.min_score_threshold_grid,
+            rank_weight_power_grid=args.rank_weight_power_grid,
+            hold_rank_buffer_grid=args.hold_rank_buffer_grid,
+            score_hysteresis_grid=args.score_hysteresis_grid,
+            max_holding_days_grid=args.max_holding_days_grid,
+            stop_loss_pct_grid=args.stop_loss_pct_grid,
+            take_profit_pct_grid=args.take_profit_pct_grid,
+            trailing_stop_atr_multiple_grid=args.trailing_stop_atr_multiple_grid,
+            max_entry_turnover_per_rebalance_grid=args.max_entry_turnover_per_rebalance_grid,
+            dynamic_breadth_score_threshold_grid=args.dynamic_breadth_score_threshold_grid,
+            min_dynamic_positions_grid=args.min_dynamic_positions_grid,
+            min_close_location_1_grid=args.min_close_location_1_grid,
+            max_true_range_pct_1_grid=args.max_true_range_pct_1_grid,
+            max_volume_surprise_5_grid=args.max_volume_surprise_5_grid,
+            max_abs_ma_distance_20_grid=args.max_abs_ma_distance_20_grid,
+            min_liquidity_20_grid=args.min_liquidity_20_grid,
         ),
         universe_cfg,
         standardize_cfg,
@@ -1430,6 +1491,7 @@ def build_parser() -> argparse.ArgumentParser:
     combo_regime_parser.add_argument("--oos-end", required=True)
     combo_regime_parser.add_argument("--candidate-factors", nargs="+", default=None)
     combo_regime_parser.add_argument("--top-n", type=int, default=None)
+    combo_regime_parser.add_argument("--top-n-grid", nargs="+", type=int, default=None)
     combo_regime_parser.add_argument("--rebalance-every-n-days", type=int, default=None)
     combo_regime_parser.add_argument(
         "--aggressive-model-path",
@@ -1445,6 +1507,8 @@ def build_parser() -> argparse.ArgumentParser:
     combo_regime_parser.add_argument("--mix-window-days", type=int, default=63)
     combo_regime_parser.add_argument("--mix-step-days", type=int, default=21)
     combo_regime_parser.add_argument("--min-mix-sample-days", type=int, default=40)
+    combo_regime_parser.add_argument("--mixture-neighbor-count", type=int, default=3)
+    combo_regime_parser.add_argument("--mixture-distance-power", type=float, default=1.0)
     combo_regime_parser.add_argument("--candidate-pool-size", type=int, default=None)
     combo_regime_parser.add_argument("--min-combo-size", type=int, default=None)
     combo_regime_parser.add_argument("--max-combo-size", type=int, default=None)
@@ -1454,11 +1518,36 @@ def build_parser() -> argparse.ArgumentParser:
     combo_regime_parser.add_argument("--min-oos-rank-ic", type=float, default=None)
     combo_regime_parser.add_argument("--min-train-hit-rate", type=float, default=None)
     combo_regime_parser.add_argument("--min-oos-hit-rate", type=float, default=None)
+    combo_regime_parser.add_argument("--min-train-rank-ic-consistency", type=float, default=None)
+    combo_regime_parser.add_argument("--min-oos-rank-ic-consistency", type=float, default=None)
+    combo_regime_parser.add_argument("--min-train-spread-consistency", type=float, default=None)
+    combo_regime_parser.add_argument("--min-oos-spread-consistency", type=float, default=None)
     combo_regime_parser.add_argument("--gross-exposure-grid", nargs="+", type=float, default=None)
     combo_regime_parser.add_argument("--portfolio-soft-dd-grid", nargs="+", type=float, default=None)
     combo_regime_parser.add_argument("--portfolio-deleverage-grid", nargs="+", type=float, default=None)
     combo_regime_parser.add_argument("--portfolio-hard-dd-grid", nargs="+", type=float, default=None)
     combo_regime_parser.add_argument("--portfolio-cooldown-days-grid", nargs="+", type=int, default=None)
+    combo_regime_parser.add_argument("--rebalance-every-n-days-grid", nargs="+", type=int, default=None)
+    combo_regime_parser.add_argument("--min-score-threshold", type=float, default=None)
+    combo_regime_parser.add_argument("--min-score-threshold-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--rank-weight-power", type=float, default=None)
+    combo_regime_parser.add_argument("--rank-weight-power-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--hold-rank-buffer", type=int, default=None)
+    combo_regime_parser.add_argument("--hold-rank-buffer-grid", nargs="+", type=int, default=None)
+    combo_regime_parser.add_argument("--score-hysteresis", type=float, default=None)
+    combo_regime_parser.add_argument("--score-hysteresis-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--max-holding-days-grid", nargs="+", type=int, default=None)
+    combo_regime_parser.add_argument("--stop-loss-pct-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--take-profit-pct-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--trailing-stop-atr-multiple-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--max-entry-turnover-per-rebalance-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--dynamic-breadth-score-threshold-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--min-dynamic-positions-grid", nargs="+", type=int, default=None)
+    combo_regime_parser.add_argument("--min-close-location-1-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--max-true-range-pct-1-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--max-volume-surprise-5-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--max-abs-ma-distance-20-grid", nargs="+", type=float, default=None)
+    combo_regime_parser.add_argument("--min-liquidity-20-grid", nargs="+", type=float, default=None)
     combo_regime_parser.set_defaults(fn=cmd_alpha_combo_regime_switch)
 
     pipeline_parser = subparsers.add_parser(

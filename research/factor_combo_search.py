@@ -28,6 +28,10 @@ class FactorComboSearchConfig:
     min_oos_spread: float = 0.0
     min_train_hit_rate: float = 0.50
     min_oos_hit_rate: float = 0.50
+    min_train_rank_ic_consistency: float = 0.55
+    min_oos_rank_ic_consistency: float = 0.50
+    min_train_spread_consistency: float = 0.55
+    min_oos_spread_consistency: float = 0.50
     candidate_pool_size: int = 8
     min_combo_size: int = 2
     max_combo_size: int = 4
@@ -37,6 +41,13 @@ class FactorComboSearchConfig:
 
 def _factor_payload(result: Dict[str, Any], factor_name: str) -> Dict[str, Any]:
     return result["factors"][factor_name]
+
+
+def _directional_consistency(values: Sequence[float], direction: float) -> float:
+    oriented = [direction * float(value) for value in values if np.isfinite(value)]
+    if not oriented:
+        return 0.5
+    return float(np.mean([value > 0.0 for value in oriented]))
 
 
 def _oriented_factor_summary(
@@ -64,13 +75,23 @@ def _oriented_factor_summary(
     oos_spread = direction * raw_oos_spread
     train_hit_rate = raw_train_hit_rate if direction > 0 else 1.0 - raw_train_hit_rate
     oos_hit_rate = raw_oos_hit_rate if direction > 0 else 1.0 - raw_oos_hit_rate
+    train_rank_ic_consistency = _directional_consistency(train_payload.get("segment_rank_ic", []), direction)
+    oos_rank_ic_consistency = _directional_consistency(oos_payload.get("segment_rank_ic", []), direction)
+    train_spread_consistency = _directional_consistency(train_payload.get("segment_spread", []), direction)
+    oos_spread_consistency = _directional_consistency(oos_payload.get("segment_spread", []), direction)
+    train_stability_segment_count = int(train_payload.get("stability_segment_count", 0) or 0)
+    oos_stability_segment_count = int(oos_payload.get("stability_segment_count", 0) or 0)
 
     meta = factor_definitions.get(factor_name, {})
     selection_score = (
-        0.45 * train_rank_ic
-        + 0.30 * oos_rank_ic
+        0.40 * train_rank_ic
+        + 0.25 * oos_rank_ic
         + 0.15 * train_spread
         + 0.10 * oos_spread
+        + 0.06 * (train_rank_ic_consistency - 0.50)
+        + 0.02 * (oos_rank_ic_consistency - 0.50)
+        + 0.015 * (train_spread_consistency - 0.50)
+        + 0.005 * (oos_spread_consistency - 0.50)
     )
     return {
         "factor": factor_name,
@@ -84,6 +105,12 @@ def _oriented_factor_summary(
         "oos_spread": oos_spread,
         "train_hit_rate": train_hit_rate,
         "oos_hit_rate": oos_hit_rate,
+        "train_rank_ic_consistency": train_rank_ic_consistency,
+        "oos_rank_ic_consistency": oos_rank_ic_consistency,
+        "train_spread_consistency": train_spread_consistency,
+        "oos_spread_consistency": oos_spread_consistency,
+        "train_stability_segment_count": train_stability_segment_count,
+        "oos_stability_segment_count": oos_stability_segment_count,
         "selection_score": float(selection_score),
     }
 
@@ -129,6 +156,32 @@ def select_oriented_factor_pool(
         if summary["oos_hit_rate"] < cfg.min_oos_hit_rate:
             dropped[factor_name] = f"oriented_oos_hit_rate={summary['oos_hit_rate']:.2%} 低于阈值"
             continue
+        if (
+            summary["train_stability_segment_count"] >= 2
+            and summary["train_rank_ic_consistency"] < cfg.min_train_rank_ic_consistency
+        ):
+            dropped[factor_name] = (
+                f"train_rank_ic_consistency={summary['train_rank_ic_consistency']:.2%} 低于阈值"
+            )
+            continue
+        if (
+            summary["oos_stability_segment_count"] >= 2
+            and summary["oos_rank_ic_consistency"] < cfg.min_oos_rank_ic_consistency
+        ):
+            dropped[factor_name] = f"oos_rank_ic_consistency={summary['oos_rank_ic_consistency']:.2%} 低于阈值"
+            continue
+        if (
+            summary["train_stability_segment_count"] >= 2
+            and summary["train_spread_consistency"] < cfg.min_train_spread_consistency
+        ):
+            dropped[factor_name] = f"train_spread_consistency={summary['train_spread_consistency']:.2%} 低于阈值"
+            continue
+        if (
+            summary["oos_stability_segment_count"] >= 2
+            and summary["oos_spread_consistency"] < cfg.min_oos_spread_consistency
+        ):
+            dropped[factor_name] = f"oos_spread_consistency={summary['oos_spread_consistency']:.2%} 低于阈值"
+            continue
         selected.append(summary)
 
     ranked = sorted(selected, key=lambda item: item["selection_score"], reverse=True)
@@ -158,6 +211,9 @@ def select_train_only_oriented_factor_pool(
         train_rank_ic = direction * raw_train_rank_ic
         train_spread = direction * raw_train_spread
         train_hit_rate = raw_train_hit_rate if direction > 0 else 1.0 - raw_train_hit_rate
+        train_rank_ic_consistency = _directional_consistency(train_payload.get("segment_rank_ic", []), direction)
+        train_spread_consistency = _directional_consistency(train_payload.get("segment_spread", []), direction)
+        train_stability_segment_count = int(train_payload.get("stability_segment_count", 0) or 0)
         meta = factor_definitions.get(factor_name, {})
         summary = {
             "factor": factor_name,
@@ -171,7 +227,19 @@ def select_train_only_oriented_factor_pool(
             "oos_spread": np.nan,
             "train_hit_rate": train_hit_rate,
             "oos_hit_rate": np.nan,
-            "selection_score": float(0.70 * train_rank_ic + 0.20 * train_spread + 0.10 * (train_hit_rate - 0.50)),
+            "train_rank_ic_consistency": train_rank_ic_consistency,
+            "oos_rank_ic_consistency": np.nan,
+            "train_spread_consistency": train_spread_consistency,
+            "oos_spread_consistency": np.nan,
+            "train_stability_segment_count": train_stability_segment_count,
+            "oos_stability_segment_count": 0,
+            "selection_score": float(
+                0.65 * train_rank_ic
+                + 0.20 * train_spread
+                + 0.10 * (train_hit_rate - 0.50)
+                + 0.04 * (train_rank_ic_consistency - 0.50)
+                + 0.01 * (train_spread_consistency - 0.50)
+            ),
         }
         core_values = [train_rank_ic, train_spread, train_hit_rate]
         if not np.isfinite(core_values).all():
@@ -186,6 +254,12 @@ def select_train_only_oriented_factor_pool(
             continue
         if train_hit_rate < cfg.min_train_hit_rate:
             dropped[factor_name] = f"train_hit_rate={train_hit_rate:.2%} 低于阈值"
+            continue
+        if train_stability_segment_count >= 2 and train_rank_ic_consistency < cfg.min_train_rank_ic_consistency:
+            dropped[factor_name] = f"train_rank_ic_consistency={train_rank_ic_consistency:.2%} 低于阈值"
+            continue
+        if train_stability_segment_count >= 2 and train_spread_consistency < cfg.min_train_spread_consistency:
+            dropped[factor_name] = f"train_spread_consistency={train_spread_consistency:.2%} 低于阈值"
             continue
         selected.append(summary)
 

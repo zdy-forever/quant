@@ -17,9 +17,37 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
+from pathlib import Path
 from typing import Any, Dict, List
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    def load_dotenv(*_args: Any, **_kwargs: Any) -> bool:
+        candidates = [Path.cwd(), Path(__file__).resolve().parents[1]]
+        seen: set[Path] = set()
+        loaded = False
+        for base in candidates:
+            for directory in [base, *base.parents]:
+                if directory in seen:
+                    continue
+                seen.add(directory)
+                env_path = directory / ".env"
+                if not env_path.exists():
+                    continue
+                for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+                    line = raw_line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    value = value.strip().strip("'").strip('"')
+                    if key:
+                        os.environ.setdefault(key, value)
+                        loaded = True
+                if loaded:
+                    return True
+        return False
 
 
 @dataclass(frozen=True)
@@ -107,18 +135,40 @@ def _format_metrics(metrics: Dict[str, Any]) -> str:
     if not metrics:
         return "no metrics"
 
+    labels = {
+        "sharpe": "夏普比率",
+        "sortino": "索提诺比率",
+        "cagr": "年化收益率",
+        "max_dd": "最大回撤",
+        "calmar": "卡玛比率",
+        "annual_vol": "年化波动率",
+        "avg_turnover": "平均换手",
+        "avg_active_positions": "平均活跃持仓数",
+        "trade_count": "交易次数",
+    }
     parts: List[str] = []
-    for key in ["sharpe", "sortino", "cagr", "max_dd", "calmar", "annual_vol"]:
+    for key in ["sharpe", "sortino", "cagr", "max_dd", "calmar", "annual_vol", "avg_turnover", "avg_active_positions", "trade_count"]:
         if key not in metrics:
             continue
         value = metrics[key]
         if value is None:
             continue
         if key in {"cagr", "max_dd", "annual_vol"}:
-            parts.append(f"{key}={float(value):.2%}")
+            parts.append(f"{key}({labels.get(key, key)})={float(value):.2%}")
+        elif key in {"avg_turnover", "avg_active_positions", "trade_count"}:
+            parts.append(f"{key}({labels.get(key, key)})={float(value):.3f}")
         else:
-            parts.append(f"{key}={float(value):.3f}")
+            parts.append(f"{key}({labels.get(key, key)})={float(value):.3f}")
     return ", ".join(parts) if parts else "no metrics"
+
+
+def _format_report_files(report_files: Dict[str, Any]) -> List[str]:
+    if not report_files:
+        return ["- 无"]
+    lines: List[str] = []
+    for name, path in report_files.items():
+        lines.append(f"- {name}: {path}")
+    return lines
 
 
 def _research_subject(command_name: str) -> str:
@@ -164,7 +214,8 @@ def _pipeline_highlights(payload: Dict[str, Any]) -> List[str]:
 
     report_files = payload.get("report_files", {})
     if report_files:
-        lines.append(f"报告文件: {json.dumps(report_files, ensure_ascii=False)}")
+        lines.append("报告文件:")
+        lines.extend(_format_report_files(report_files))
     return lines
 
 
@@ -292,6 +343,61 @@ def _alpha_combo_risk_highlights(payload: Dict[str, Any]) -> List[str]:
     ]
 
 
+def _alpha_combo_regime_switch_highlights(payload: Dict[str, Any]) -> List[str]:
+    mixture = payload.get("mixture_research", {}) or {}
+    summary = mixture.get("oos_validation_summary", {}) or {}
+    oos_windows = mixture.get("oos_window_validation", []) or []
+    latest_window = oos_windows[-1] if oos_windows else {}
+    realized_metrics = latest_window.get("realized_metrics", {}) or {}
+    selected_factors = latest_window.get("selected_factors", []) or []
+    if selected_factors and isinstance(selected_factors[0], list):
+        factor_text = " | ".join(", ".join(str(name) for name in group) for group in selected_factors if group)
+    else:
+        factor_text = ", ".join(str(name) for name in selected_factors) if selected_factors else "无"
+    selected_variant = latest_window.get("selected_variant", "-")
+    weighting_method = latest_window.get("weighting_method", "heuristic")
+    selected_top_n = latest_window.get("top_n")
+    execution = latest_window.get("execution_overrides", {}) or {}
+    trade_filters = latest_window.get("trade_filters", {}) or {}
+    ensemble_member_count = int(float(latest_window.get("ensemble_member_count", 0.0) or 0.0))
+    matched_train_windows = latest_window.get("matched_train_windows", []) or []
+    target_pass_rate = float(summary.get("target_pass_rate", 0.0) or 0.0)
+    avg_cagr = float(summary.get("avg_cagr", 0.0) or 0.0)
+    avg_max_dd = float(summary.get("avg_max_dd", 0.0) or 0.0)
+    avg_sharpe = float(summary.get("avg_sharpe", 0.0) or 0.0)
+    avg_cagr_target_met = bool(summary.get("avg_cagr_target_met", False))
+
+    verdict = "这轮状态切换结果偏弱，不建议直接采用"
+    if avg_cagr_target_met and avg_max_dd > -0.15:
+        verdict = "这轮状态切换结果已经达到平均年化目标，可以进入更严格的稳定性复核"
+    elif target_pass_rate >= 0.30 and avg_cagr > 0.10 and avg_max_dd > -0.15:
+        verdict = "这轮状态切换结果开始接近可用，可以继续重点跟踪"
+    elif avg_max_dd > -0.08 and avg_cagr > 0:
+        verdict = "回撤控制更稳了，但收益还需要继续往上拉"
+
+    return [
+        "先看结论：",
+        f"- 判断：{verdict}",
+        f"- window_count(样本外窗口数)：{int(float(summary.get('window_count', 0.0) or 0.0))}",
+        f"- target_pass_rate(达标窗口占比)：{target_pass_rate:.2%}",
+        f"- avg_cagr(平均年化收益率)：{avg_cagr:.2%}",
+        f"- avg_cagr_target_met(平均年化目标达成)：{'是' if avg_cagr_target_met else '否'}",
+        f"- avg_max_dd(平均最大回撤)：{avg_max_dd:.2%}",
+        f"- avg_sharpe(平均夏普比率)：{avg_sharpe:.3f}",
+        "",
+        "最新窗口落地情况：",
+        f"- selected_variant(选中版本)：{selected_variant}",
+        f"- selected_factors(选中因子)：{factor_text}",
+        f"- weighting_method(权重生成方式)：{weighting_method}",
+        f"- ensemble_member_count(融合近邻数)：{ensemble_member_count if ensemble_member_count else '无'}",
+        f"- matched_train_windows(匹配训练窗口)：{', '.join(str(item) for item in matched_train_windows) if matched_train_windows else '无'}",
+        f"- top_n(持仓数)：{int(selected_top_n) if selected_top_n is not None else '无'}",
+        f"- execution_overrides(执行参数)：{json.dumps(execution, ensure_ascii=False) if execution else '无'}",
+        f"- trade_filters(交易过滤)：{json.dumps(trade_filters, ensure_ascii=False) if trade_filters else '无'}",
+        f"- 最新窗口结果：{_format_metrics(realized_metrics)}",
+    ]
+
+
 def _generic_research_body(command_name: str, payload: Dict[str, Any]) -> str:
     lines = [
         f"任务: {command_name}",
@@ -310,6 +416,8 @@ def _generic_research_body(command_name: str, payload: Dict[str, Any]) -> str:
         lines.extend(_alpha_combo_walk_forward_highlights(payload))
     elif command_name == "alpha-combo-risk-search":
         lines.extend(_alpha_combo_risk_highlights(payload))
+    elif command_name == "alpha-combo-regime-switch":
+        lines.extend(_alpha_combo_regime_switch_highlights(payload))
 
     if command_name == "pipeline":
         lines.extend(
@@ -329,7 +437,7 @@ def _generic_research_body(command_name: str, payload: Dict[str, Any]) -> str:
             [
                 "",
                 "报告文件：",
-                json.dumps(payload.get("report_files", {}), ensure_ascii=False),
+                *_format_report_files(payload.get("report_files", {})),
                 "",
                 "如果你后面还是觉得难懂，我可以继续把邮件再压缩成“只看结论 + 只看操作建议”的版本。",
                 "这是一封自动通知邮件，由财政小助手mina发出。",

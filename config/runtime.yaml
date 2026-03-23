@@ -32,6 +32,13 @@ backtest:
   max_positions: 8
   gross_exposure: 1.0
   rebalance_every_n_days: 1
+  min_score_threshold: -999.0
+  rank_weight_power: 0.0
+  hold_rank_buffer: 0
+  score_hysteresis: 0.0
+  max_entry_turnover_per_rebalance: 0.0
+  dynamic_breadth_score_threshold: -999.0
+  min_dynamic_positions: 0
   slippage_bps: 5.0
   commission_bps: 0.0
   stop_loss_pct: 0.04
