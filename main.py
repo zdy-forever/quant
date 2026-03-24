@@ -31,6 +31,7 @@ from pipelines.run_composite_portfolio import FactorPortfolioSpec, run_composite
 from pipelines.run_factor_pipeline import FactorPipelineSpec, run_factor_pipeline
 from pipelines.run_factor_research import FactorResearchSpec, run_factor_research
 from pipelines.run_factor_selection import FactorFreezeSpec, run_factor_selection
+from pipelines.run_income_etf_rotation import IncomeEtfRotationSpec, run_income_etf_rotation
 from pipelines.run_walk_forward import FactorWalkForwardSpec, run_factor_walk_forward
 from research.factor_combo_search import FactorComboSearchConfig
 from research.factor_engine import UniverseConfig, build_factor_research_panel
@@ -115,6 +116,36 @@ def _ohlcv_cache_path(symbols: List[str], start: str, end: str, adjustment: str)
     digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
     os.makedirs(OHLCV_CACHE_DIR, exist_ok=True)
     return os.path.join(OHLCV_CACHE_DIR, f"daily_{start}_{end}_{adjustment.lower()}_{digest}.csv")
+
+
+def _load_cached_ohlcv(path: str) -> pd.DataFrame:
+    cached: pd.DataFrame = pd.read_csv(str(path))
+    cached["timestamp"] = pd.to_datetime(cached["timestamp"], utc=True)
+    cached["symbol"] = cached["symbol"].astype(str)
+    return cached[["timestamp", "symbol", "open", "high", "low", "close", "volume"]].sort_values(["timestamp", "symbol"])
+
+
+def _find_covering_cache_path(symbols: List[str], start: str, end: str, adjustment: str) -> str | None:
+    normalized = sorted({symbol.upper() for symbol in symbols})
+    start_ts = pd.Timestamp(start, tz="UTC")
+    end_ts = pd.Timestamp(end, tz="UTC")
+    adjustment_token = f"_{str(adjustment).lower()}_"
+
+    for filename in sorted(os.listdir(OHLCV_CACHE_DIR)):
+        if not filename.endswith(".csv") or adjustment_token not in filename:
+            continue
+        path = os.path.join(OHLCV_CACHE_DIR, filename)
+        try:
+            sample = pd.read_csv(path, usecols=["timestamp", "symbol"])
+        except Exception:
+            continue
+        sample["timestamp"] = pd.to_datetime(sample["timestamp"], utc=True)
+        sample_symbols = sorted(sample["symbol"].astype(str).str.upper().unique().tolist())
+        if sample_symbols != normalized:
+            continue
+        if sample["timestamp"].min() <= start_ts and sample["timestamp"].max() >= end_ts:
+            return path
+    return None
 
 
 def collect_reference_symbols(
@@ -239,12 +270,19 @@ def fetch_daily_ohlcv(
     adjustment_value = str(adjustment or DEFAULT_BAR_ADJUSTMENT).strip().lower()
     cache_path = _ohlcv_cache_path(clean_symbols, start, end, adjustment_value)
     if os.path.exists(cache_path):
-        cached: pd.DataFrame = pd.read_csv(str(cache_path))
-        cached["timestamp"] = pd.to_datetime(cached["timestamp"], utc=True)
-        cached["symbol"] = cached["symbol"].astype(str)
-        return cached[["timestamp", "symbol", "open", "high", "low", "close", "volume"]].sort_values(
-            ["timestamp", "symbol"]
-        )
+        return _load_cached_ohlcv(cache_path)
+
+    if os.path.exists(OHLCV_CACHE_DIR):
+        covering_cache_path = _find_covering_cache_path(clean_symbols, start, end, adjustment_value)
+        if covering_cache_path:
+            cached = _load_cached_ohlcv(covering_cache_path)
+            sliced = cached[
+                (cached["timestamp"] >= pd.Timestamp(start, tz="UTC"))
+                & (cached["timestamp"] <= pd.Timestamp(end, tz="UTC"))
+            ].copy()
+            if not sliced.empty:
+                sliced.to_csv(cache_path, index=False)
+                return sliced.sort_values(["timestamp", "symbol"])
 
     all_frames: List[pd.DataFrame] = []
     for chunk in _chunk_symbols(clean_symbols, ALPACA_SYMBOL_CHUNK_SIZE):
@@ -1136,6 +1174,48 @@ def cmd_alpha_combo_regime_switch(args: argparse.Namespace) -> None:
     _notify_research("alpha-combo-regime-switch", result)
 
 
+def cmd_income_etf_rotation(args: argparse.Namespace) -> None:
+    from backtest.engine import BacktestConfig
+
+    runtime = load_runtime_config()
+    data_client, _ = get_alpaca_clients()
+    symbols = [str(symbol).upper() for symbol in (args.symbols or ["QQQI", "JEPQ", "QQQ", "JEPI"])]
+    adjusted_ohlcv = fetch_daily_ohlcv(
+        data_client,
+        symbols,
+        args.start,
+        args.end,
+        adjustment=get_research_adjustment(runtime),
+    )
+    raw_ohlcv = fetch_daily_ohlcv(
+        data_client,
+        symbols,
+        args.start,
+        args.end,
+        adjustment="raw",
+    )
+    backtest_cfg = BacktestConfig(**(runtime.get("backtest", {}) or {}))
+    result = run_income_etf_rotation(
+        adjusted_ohlcv,
+        raw_ohlcv,
+        IncomeEtfRotationSpec(
+            symbols=symbols,
+            start=args.start,
+            end=args.end,
+            train_end=args.train_end,
+            top_n_grid=args.top_n_grid,
+            rebalance_every_n_days_grid=args.rebalance_every_n_days_grid,
+            stop_loss_pct_grid=args.stop_loss_pct_grid,
+            min_score_threshold_grid=args.min_score_threshold_grid,
+            rank_weight_power_grid=args.rank_weight_power_grid,
+            validation_window_days=args.validation_window_days,
+        ),
+        backtest_cfg,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _notify_research("income-etf-rotation", result)
+
+
 def cmd_pipeline(args: argparse.Namespace) -> None:
     from alpha_lab.research import AlphaResearchConfig
     from backtest.engine import BacktestConfig
@@ -1549,6 +1629,22 @@ def build_parser() -> argparse.ArgumentParser:
     combo_regime_parser.add_argument("--max-abs-ma-distance-20-grid", nargs="+", type=float, default=None)
     combo_regime_parser.add_argument("--min-liquidity-20-grid", nargs="+", type=float, default=None)
     combo_regime_parser.set_defaults(fn=cmd_alpha_combo_regime_switch)
+
+    income_etf_parser = subparsers.add_parser(
+        "income-etf-rotation",
+        help="Run a dividend-aware ETF rotation study on a small ETF universe",
+    )
+    income_etf_parser.add_argument("--start", required=True)
+    income_etf_parser.add_argument("--train-end", required=True)
+    income_etf_parser.add_argument("--end", required=True)
+    income_etf_parser.add_argument("--symbols", nargs="+", default=["QQQI", "JEPQ", "QQQ", "JEPI"])
+    income_etf_parser.add_argument("--top-n-grid", nargs="+", type=int, default=None)
+    income_etf_parser.add_argument("--rebalance-every-n-days-grid", nargs="+", type=int, default=None)
+    income_etf_parser.add_argument("--stop-loss-pct-grid", nargs="+", type=float, default=None)
+    income_etf_parser.add_argument("--min-score-threshold-grid", nargs="+", type=float, default=None)
+    income_etf_parser.add_argument("--rank-weight-power-grid", nargs="+", type=float, default=None)
+    income_etf_parser.add_argument("--validation-window-days", type=int, default=21)
+    income_etf_parser.set_defaults(fn=cmd_income_etf_rotation)
 
     pipeline_parser = subparsers.add_parser(
         "pipeline",

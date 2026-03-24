@@ -1,5 +1,94 @@
 # Changes Log
 
+## 2026-03-24 1.0.42（4ETF 目标函数改为超越长期持有）
+
+### 把 ETF 轮动线的核心目标改成“比最强长期持有多 2%”
+
+- 更新了 [pipelines/run_income_etf_rotation.py](pipelines/run_income_etf_rotation.py)
+  - 不再要求 `QQQI / JEPQ / QQQ / JEPI` 必须从同一天起都有数据
+  - 改为允许：
+    - `QQQ / JEPI` 从 `2022-01-03`
+    - `JEPQ` 从 `2022-05-04`
+    - `QQQI` 从 `2024-01-30`
+    自然加入轮动池
+  - 每天只对“当日有数据且特征已可算”的 ETF 做横截面排序
+  - 候选策略评分不再只看自身 `CAGR / Sharpe`
+  - 新增“相对最强 buy-and-hold 的 CAGR 超额”作为优先目标
+  - 支持 `target_excess_cagr_vs_best_hold`，默认要求至少 `+2%`
+  - 报告会直接写出：
+    - train 最强长期持有是谁
+    - OOS 最强长期持有是谁
+    - 当前策略相对最强长期持有多/少了多少年化
+
+### 测试
+
+- 更新了 [tests/test_income_etf_rotation.py](tests/test_income_etf_rotation.py)
+  - 新增“晚上市 ETF 不应抹掉早期样本”测试
+- 当前相关测试通过：`4 passed`
+
+## 2026-03-24 1.0.41（4ETF 轮动二次增强）
+
+### 沿 `QQQI / JEPQ / QQQ / JEPI` 主线继续优化
+
+- 更新了 [pipelines/run_income_etf_rotation.py](pipelines/run_income_etf_rotation.py)
+  - 新增更适合短历史 ETF 的特征：
+    - `10/21/42` 日 total-return / price momentum
+    - `10/21/42` 日 dividend carry
+    - `carry_acceleration`
+    - `relative_strength_21/42`
+    - `volatility_10` / `downside_10`
+  - 扩充了 profile 库，新增更偏短期 leader 和 income breakout 的表达
+  - 研究不再只看整段 train 指标，新增：
+    - 训练期内部 `validation_window_days` 分段验证
+    - `avg_cagr / avg_sharpe / cagr_hit_rate` 稳定性摘要
+  - 搜索空间新增：
+    - `min_score_threshold`
+    - `rank_weight_power`
+  - 这样可以控制“top2 是否把最强 ETF 收益摊薄”
+- 更新了 [main.py](main.py)
+  - `income-etf-rotation` 新增参数：
+    - `--min-score-threshold-grid`
+    - `--rank-weight-power-grid`
+    - `--validation-window-days`
+- 更新了 [tests/test_income_etf_rotation.py](tests/test_income_etf_rotation.py)
+  - 新增 validation helper 测试
+  - 新增新特征列断言
+
+### 测试
+
+- 当前相关测试通过：`3 passed`
+
+## 2026-03-24 1.0.40（4ETF 分红感知轮动研究）
+
+### 针对 `QQQI / JEPQ / QQQ / JEPI` 单独开了一条小池子前台研究线
+
+- 新增了 [pipelines/run_income_etf_rotation.py](pipelines/run_income_etf_rotation.py)
+  - 不再硬套大横截面 low-corr alpha 框架
+  - 改为专门研究少量 ETF 的轮动：
+    - `adjustment="all"` 代表含分红总回报
+    - `adjustment="raw"` 代表裸价格走势
+    - 两者回报差近似成 `dividend_carry`
+  - 内置少量可解释 profile，对比：
+    - 纯价格 / 总回报趋势
+    - 分红 carry + 趋势平衡
+    - 更偏防守的收益型轮动
+  - 会同时输出：
+    - best price-only baseline
+    - best dividend-aware strategy
+    - OOS buy-and-hold 基准
+- 更新了 [main.py](main.py)
+  - 新增命令：`income-etf-rotation`
+  - 新增缓存回退逻辑：
+    - 如果精确日期缓存不存在，会优先复用覆盖更大区间的本地 OHLCV 缓存再切片
+    - 这样前台研究不必为了小日期窗口反复联网
+
+### 测试
+
+- 新增了 [tests/test_income_etf_rotation.py](tests/test_income_etf_rotation.py)
+  - 覆盖 dividend carry 提取
+  - 覆盖 profile 库同时保留 price-only / dividend-aware
+- 当前相关测试通过：`2 passed`
+
 ## 2026-03-23 1.0.39（Mixture 邻居加权融合）
 
 ### 把 OOS 的 mix-aware 选择从“最近邻单模型”升级成“多邻居加权组合”
