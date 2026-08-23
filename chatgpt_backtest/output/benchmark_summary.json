@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "period": "2021-2025",
+    "contrib_aud": 18000,
+    "fx": "Yahoo AUDCNY=X",
+    "timing": "A$300 converted at first A-share trading day of each month; index monthly return then applied; terminal converted at last A-share trading day",
+    "fees": "none",
+    "price_vs_total_return": "both shown"
+  },
+  "csi300_price": {
+    "terminal_aud": 20423.828535121513,
+    "profit_aud": 2423.8285351215127,
+    "xirr": 0.05003367548308357,
+    "account_monthly_max_dd": -0.05833471616292185,
+    "index_monthly_max_dd": -0.3992575383650706
+  },
+  "csi300_total_return": {
+    "terminal_aud": 21858.77699295619,
+    "profit_aud": 3858.776992956191,
+    "xirr": 0.07713275616404658,
+    "account_monthly_max_dd": -0.058781201302956165,
+    "index_monthly_max_dd": -0.35859385398627575
+  },
+  "csi1000_price": {
+    "terminal_aud": 21644.195331638508,
+    "profit_aud": 3644.195331638508,
+    "xirr": 0.0731859475259794,
+    "account_monthly_max_dd": -0.1614743732517655,
+    "index_monthly_max_dd": -0.42527303799142113
+  },
+  "csi1000_total_return": {
+    "terminal_aud": 22325.566257641683,
+    "profit_aud": 4325.5662576416835,
+    "xirr": 0.08559756443821331,
+    "account_monthly_max_dd": -0.16227597377751657,
+    "index_monthly_max_dd": -0.40479711948002706
+  }
+}
