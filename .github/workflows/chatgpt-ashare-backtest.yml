@@ -18,7 +18,7 @@ jobs:
       - run: python -m pip install --quiet pandas numpy requests
       - run: python chatgpt_backtest/ashare_bt.py
       - run: python chatgpt_backtest/make_summary.py
-      - run: python chatgpt_backtest/ashare_bt_funded.py
+      - run: python -m chatgpt_backtest.ashare_bt_funded
       - name: Commit results to temporary branch
         run: |
           git config user.name chatgpt-backtest-bot
