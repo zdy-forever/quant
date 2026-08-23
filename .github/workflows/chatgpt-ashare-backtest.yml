@@ -1,10 +1,7 @@
 name: ChatGPT A-share dual backtest
 on:
-  push:
-    branches: [chatgpt-ashare-backtest-20260823]
   pull_request:
     branches: [main]
-  workflow_dispatch:
 permissions:
   contents: read
 jobs:
