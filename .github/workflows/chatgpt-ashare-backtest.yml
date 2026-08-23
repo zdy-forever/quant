@@ -22,5 +22,5 @@ jobs:
           git config user.name chatgpt-backtest-bot
           git config user.email chatgpt-backtest-bot@users.noreply.github.com
           git add chatgpt_backtest/output
-          git commit -m "Backtest funded results [skip ci]" || exit 0
+          git commit -m "Backtest no-cap results [skip ci]" || exit 0
           git push origin HEAD:${{ github.head_ref || github.ref_name }}
