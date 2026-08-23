@@ -1,8 +1,6 @@
 name: ChatGPT A-share dual backtest
 on:
-  push:
-    branches: [chatgpt-ashare-backtest-20260823]
-  pull_request:
+  pull_request_target:
     branches: [main]
 permissions:
   contents: write
@@ -12,6 +10,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -23,4 +23,4 @@ jobs:
           git config user.email chatgpt-backtest-bot@users.noreply.github.com
           git add chatgpt_backtest/output
           git commit -m "Backtest no-cap results [skip ci]" || exit 0
-          git push origin HEAD:${{ github.head_ref || github.ref_name }}
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
